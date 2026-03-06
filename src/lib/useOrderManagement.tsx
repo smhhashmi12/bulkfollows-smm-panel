@@ -157,7 +157,7 @@ export const useOrderManagement = () => {
             // Prefer provider status polling when provider order exists
             if (providerId && providerOrderId) {
               const resp = await fetch(
-                `/api/provider/order-status?provider_id=${encodeURIComponent(providerId)}&orders=${encodeURIComponent(providerOrderId)}`
+                `/api/provider/order-status?provider_id=${encodeURIComponent(providerId)}&orders=${encodeURIComponent(providerOrderId)}&local_order_id=${encodeURIComponent(orderId)}`
               );
 
               if (resp.ok) {
@@ -168,7 +168,9 @@ export const useOrderManagement = () => {
                   statusPayload?.[String(providerOrderId)] ||
                   statusPayload;
 
-                const rawStatus = String(statusNode?.status || '').toLowerCase();
+                const rawStatus = String(
+                  statusNode?.status || statusNode?.Status || statusNode || ''
+                ).toLowerCase();
                 const mappedStatus: OrderResult['status'] =
                   rawStatus.includes('complete') ? 'completed' :
                   rawStatus.includes('cancel') || rawStatus.includes('fail') ? 'failed' :
@@ -265,6 +267,7 @@ export const useOrderManagement = () => {
         // Step 2: Detect provider mapping for selected service
         const providerMeta = parseProviderMeta(service);
         let providerOrderId: string | undefined;
+        let persistedStatus: OrderResult['status'] = 'processing';
 
         // Step 3: Create order in local database
         const createdOrder = await executeWithRetry(
@@ -273,7 +276,8 @@ export const useOrderManagement = () => {
               service.id,
               orderData.link,
               orderData.quantity,
-              orderData.deliveryTime
+              orderData.deliveryTime,
+              providerMeta?.providerId
             );
           },
           { maxRetries: 2, delayMs: 1000, backoffMultiplier: 1.5 }
@@ -289,6 +293,7 @@ export const useOrderManagement = () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 provider_id: providerMeta.providerId,
+                local_order_id: createdOrder.id,
                 service: providerMeta.providerServiceId,
                 link: orderData.link,
                 quantity: orderData.quantity,
@@ -298,12 +303,42 @@ export const useOrderManagement = () => {
 
             if (providerResp.ok && providerData?.order) {
               providerOrderId = String(providerData.order);
+              if (providerData?.localOrder?.status) {
+                persistedStatus = String(providerData.localOrder.status).toLowerCase() as OrderResult['status'];
+              }
               console.log('[OrderManagement] Provider order placed:', providerOrderId);
             } else {
               console.warn('[OrderManagement] Provider order placement failed:', providerData);
+              const providerError =
+                providerData?.details ||
+                providerData?.message ||
+                providerData?.error ||
+                'Provider rejected the order.';
+              const failedResult: OrderResult = {
+                id: createdOrder.id,
+                status: 'failed',
+                charge: charge,
+                orderId: createdOrder.id,
+                message: String(providerError),
+              };
+              setOrderStatus(failedResult);
+              setError(`Order #${createdOrder.id} was not accepted by the provider: ${providerError}`);
+              return failedResult;
             }
           } catch (providerErr) {
             console.warn('[OrderManagement] Provider API call failed:', providerErr);
+            const providerError =
+              providerErr instanceof Error ? providerErr.message : 'Provider API request failed.';
+            const failedResult: OrderResult = {
+              id: createdOrder.id,
+              status: 'failed',
+              charge: charge,
+              orderId: createdOrder.id,
+              message: providerError,
+            };
+            setOrderStatus(failedResult);
+            setError(`Order #${createdOrder.id} could not be confirmed by the provider: ${providerError}`);
+            return failedResult;
           }
         }
 
@@ -324,7 +359,7 @@ export const useOrderManagement = () => {
         // Step 7: Set success state
         const result: OrderResult = {
           id: createdOrder.id,
-          status: 'processing',
+          status: persistedStatus,
           charge: charge,
           orderId: createdOrder.id,
           providerOrderId,

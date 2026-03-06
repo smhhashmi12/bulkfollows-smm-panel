@@ -28,11 +28,15 @@ export interface Order {
   id: string;
   user_id: string;
   service_id: string;
+  provider_id?: string | null;
   link: string;
   quantity: number;
   charge: number;
   delivery_time?: number | null; // hours selected by user
   status: 'pending' | 'processing' | 'completed' | 'canceled' | 'failed';
+  provider_order_id?: string | null;
+  start_count?: number | null;
+  remains?: number | null;
   created_at: string;
   service?: Service;
 }
@@ -266,7 +270,8 @@ export const ordersAPI = {
     serviceId: string,
     link: string,
     quantity: number,
-    deliveryTime: number = 24
+    deliveryTime: number = 24,
+    providerId?: string
   ) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
@@ -290,10 +295,12 @@ export const ordersAPI = {
       .insert({
         user_id: user.id,
         service_id: serviceId,
+        provider_id: providerId || null,
         link,
         quantity,
         charge,
         delivery_time: deliveryTime,
+        status: 'processing',
       })
       .select()
       .single();

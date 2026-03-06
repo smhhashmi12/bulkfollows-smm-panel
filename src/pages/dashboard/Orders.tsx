@@ -87,21 +87,30 @@ const OrdersPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-border">
-              {orders.map(order => (
+              {orders.map(order => {
+                const displayStatus =
+                  order.status === 'pending' && order.provider_order_id ? 'processing' : order.status;
+
+                return (
                 <tr key={order.id} className="hover:bg-black/10">
-                  <td className="p-4">#{order.id.slice(0, 8)}</td>
+                  <td className="p-4">
+                    <div>#{order.id.slice(0, 8)}</div>
+                    {order.provider_order_id && (
+                      <div className="text-xs text-gray-400 mt-1">Provider: {order.provider_order_id}</div>
+                    )}
+                  </td>
                   <td className="p-4 text-gray-300">{formatDate(order.created_at)}</td>
                   <td className="p-4">{order.service?.name || 'N/A'}</td>
                   <td className="p-4 text-gray-300 truncate max-w-xs">{order.link}</td>
                   <td className="p-4">{order.quantity.toLocaleString()}</td>
                   <td className="p-4 font-medium text-green-400">{formatAmount(order.charge)}</td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[order.status] || statusColors.pending}`}>
-                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[displayStatus] || statusColors.pending}`}>
+                      {displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
                     </span>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           </div>
