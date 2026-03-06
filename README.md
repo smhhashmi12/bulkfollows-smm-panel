@@ -1,5 +1,5 @@
 ﻿<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+<img width="1200" height="475" alt="GHBanner" src="/artifacts/qa/admin-dashboard.png" />
 </div>
 
 # BulkFollows SMM Panel
@@ -8,7 +8,7 @@ A modern Social Media Marketing (SMM) reseller panel built with React, TypeScrip
 
 ## Features
 
-- ðŸ” **User Authentication** - Secure authentication system with Supabase
+- **User Authentication** - Secure authentication system with Supabase
 - ðŸ’³ **FastPay Integration** - Payment processing with FastPay
 - ðŸ“Š **Dashboard** - Real-time statistics and order management
 - ðŸ›’ **Order Management** - Create and track orders
