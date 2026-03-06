@@ -2,6 +2,7 @@
 import StatCard from '../../components/dashboard/StatCard';
 import { authAPI, ordersAPI, servicesAPI, adminAPI } from '../../lib/api';
 import { getCachedAuthUser } from '../../lib/useAuthCheck';
+import { withTimeout } from '../../lib/withTimeout';
 import type { UserProfile, Order, Service } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
 import { Card, Button, Tabs, TabItem, Badge } from '../../design-system';
@@ -143,10 +144,15 @@ const DashboardPage: React.FC = () => {
                 }
                 
                 const [userProfile, userOrders, allServices, allAnnouncements] = await Promise.all([
-                    authAPI.getUserProfile(),
-                    ordersAPI.getOrders(),
-                    servicesAPI.getMergedServices(),
-                    adminAPI.getPublishedAnnouncements().catch(() => []),
+                    withTimeout(authAPI.getUserProfile(), 8000, null, 'dashboard profile'),
+                    withTimeout(ordersAPI.getOrders(), 8000, [], 'dashboard orders'),
+                    withTimeout(servicesAPI.getMergedServices(), 8000, [], 'dashboard services'),
+                    withTimeout(
+                        adminAPI.getPublishedAnnouncements().catch(() => []),
+                        8000,
+                        [],
+                        'dashboard announcements'
+                    ),
                 ]);
                 setProfile(userProfile);
                 setOrders(userOrders);

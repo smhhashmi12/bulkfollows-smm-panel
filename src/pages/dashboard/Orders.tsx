@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ordersAPI } from '../../lib/api';
 import { getCachedAuthUser } from '../../lib/useAuthCheck';
+import { withTimeout } from '../../lib/withTimeout';
 import type { Order } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
 
@@ -31,7 +32,7 @@ const OrdersPage: React.FC = () => {
           return;
         }
         
-        const userOrders = await ordersAPI.getOrders();
+        const userOrders = await withTimeout(ordersAPI.getOrders(), 8000, [], 'orders page list');
         console.log('[Orders] Orders loaded:', userOrders);
         setOrders(userOrders as Order[]);
       } catch (err: any) {

@@ -1,6 +1,60 @@
 import { supabase } from './supabase';
 import type { User } from '../App';
 
+const PROVIDER_SERVICES_TIMEOUT_MS = 5000;
+const PROVIDER_SERVICES_CACHE_TTL_MS = 60000;
+const PROVIDER_SERVICES_FAILURE_BACKOFF_MS = 15000;
+
+let providerServicesCache: any[] = [];
+let providerServicesCacheExpiresAt = 0;
+let providerServicesFailureBackoffUntil = 0;
+
+async function getProviderServicesSnapshot() {
+  const now = Date.now();
+
+  if (providerServicesCacheExpiresAt > now) {
+    return providerServicesCache;
+  }
+
+  if (providerServicesFailureBackoffUntil > now) {
+    return [];
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_SERVICES_TIMEOUT_MS);
+
+  try {
+    const response = await fetch('/api/integrations/provider-services', {
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch provider services: ${response.status} ${response.statusText}`);
+    }
+
+    const payload = await response.json();
+    const providerServices = Array.isArray(payload?.providerServices) ? payload.providerServices : [];
+
+    providerServicesCache = providerServices;
+    providerServicesCacheExpiresAt = Date.now() + PROVIDER_SERVICES_CACHE_TTL_MS;
+    providerServicesFailureBackoffUntil = 0;
+
+    return providerServices;
+  } catch (error) {
+    providerServicesFailureBackoffUntil = Date.now() + PROVIDER_SERVICES_FAILURE_BACKOFF_MS;
+
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      console.warn('[servicesAPI] provider-services request timed out; using regular services only');
+    } else {
+      console.error('[servicesAPI] provider-services request failed:', error);
+    }
+
+    return [];
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export interface UserProfile {
   id: string;
   username: string;
@@ -196,17 +250,14 @@ export const servicesAPI = {
   // Get merged services (regular services + provider services)
   async getMergedServices(category?: string) {
     try {
-      const regularServices = await this.getServices(category);
+      const [regularServices, providerServices] = await Promise.all([
+        this.getServices(category),
+        getProviderServicesSnapshot(),
+      ]);
 
-      // Read provider services from server endpoint (bypasses RLS for non-admin users).
-      const response = await fetch('/api/integrations/provider-services');
-      if (!response.ok) {
-        console.error('Error fetching provider services from integration endpoint');
+      if (!providerServices.length) {
         return regularServices;
       }
-
-      const payload = await response.json();
-      const providerServices = payload?.providerServices || [];
 
       const providerByServiceId = new Map<string, any>();
       const providerByProviderServiceId = new Map<string, any>();

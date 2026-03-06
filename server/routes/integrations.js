@@ -2,12 +2,34 @@ import express from 'express';
 import { supabase, supabaseConfigured, supabaseAdmin } from '../lib/supabaseServer.js';
 
 const router = express.Router();
+const SUPABASE_QUERY_TIMEOUT_MS = 5000;
 
 const extractProviderServiceId = (description) => {
   const text = String(description || '');
   const match = text.match(/Provider Service ID:\s*([^|]+)/i);
   return match ? String(match[1]).trim() : '';
 };
+
+async function runTimedQuery(query, label) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SUPABASE_QUERY_TIMEOUT_MS);
+
+  try {
+    return await query.abortSignal(controller.signal);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error(`[Server] ${label} timed out after ${SUPABASE_QUERY_TIMEOUT_MS}ms`);
+      return {
+        data: null,
+        error: new Error(`${label} timed out`),
+      };
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // GET /api/integrations/provider-names
 // Fetches provider names using admin access (bypasses RLS)
@@ -87,47 +109,51 @@ router.get('/provider-services', async (req, res) => {
       return res.status(503).json({ error: 'Service temporarily unavailable' });
     }
 
-    // Fetch provider services without relying on FK embed joins
-    const { data: providerServices, error } = await supabaseAdmin
-      .from('provider_services')
-      .select(`
-        id,
-        provider_id,
-        provider_service_id,
-        provider_rate,
-        our_rate,
-        min_quantity,
-        max_quantity,
-        status,
-        service_id
-      `)
-      .eq('status', 'active');
+    const { data: providerServices, error } = await runTimedQuery(
+      supabaseAdmin
+        .from('provider_services')
+        .select(`
+          id,
+          provider_id,
+          provider_service_id,
+          provider_rate,
+          our_rate,
+          min_quantity,
+          max_quantity,
+          status,
+          service_id
+        `)
+        .eq('status', 'active'),
+      'provider services query'
+    );
 
     if (error) {
       console.error('[Server] Error fetching provider services:', error);
-      return res.status(500).json({ error: 'Failed to fetch provider services' });
+      return res.json({ ok: true, providerServices: [] });
     }
 
-    const { data: allServices, error: servicesError } = await supabaseAdmin
-      .from('services')
-      .select('id, name, category, description, status')
-      .eq('status', 'active')
-      .limit(20000);
-
-    if (servicesError) {
-      console.error('[Server] Error fetching services for mapping:', servicesError);
-      return res.status(500).json({ error: 'Failed to fetch services for mapping' });
-    }
+    const { data: allServices, error: servicesError } = await runTimedQuery(
+      supabaseAdmin
+        .from('services')
+        .select('id, name, category, description, status')
+        .eq('status', 'active')
+        .limit(5000),
+      'services mapping query'
+    );
 
     const serviceById = new Map();
     const serviceByProviderServiceId = new Map();
-    (allServices || []).forEach((svc) => {
-      serviceById.set(String(svc.id), svc);
-      const providerSvcId = extractProviderServiceId(svc.description);
-      if (providerSvcId && !serviceByProviderServiceId.has(providerSvcId)) {
-        serviceByProviderServiceId.set(providerSvcId, svc);
-      }
-    });
+    if (servicesError) {
+      console.error('[Server] Error fetching services for mapping:', servicesError);
+    } else {
+      (allServices || []).forEach((svc) => {
+        serviceById.set(String(svc.id), svc);
+        const providerSvcId = extractProviderServiceId(svc.description);
+        if (providerSvcId && !serviceByProviderServiceId.has(providerSvcId)) {
+          serviceByProviderServiceId.set(providerSvcId, svc);
+        }
+      });
+    }
 
     const mergedProviderServices = (providerServices || []).map((row) => {
       const byId = row.service_id ? serviceById.get(String(row.service_id)) : null;

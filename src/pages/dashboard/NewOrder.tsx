@@ -2,6 +2,7 @@
 import { servicesAPI, authAPI, paymentsAPI } from '../../lib/api';
 import { getCachedAuthUser } from '../../lib/useAuthCheck';
 import useOrderManagement from '../../lib/useOrderManagement';
+import { withTimeout } from '../../lib/withTimeout';
 import type { Service, UserProfile } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
 
@@ -189,8 +190,8 @@ const NewOrderPage: React.FC = () => {
         }
         
         const [servicesData, userProfile] = await Promise.all([
-          servicesAPI.getMergedServices(), // Now includes both regular and provider services
-          authAPI.getUserProfile(),
+          withTimeout(servicesAPI.getMergedServices(), 8000, [], 'new order services'),
+          withTimeout(authAPI.getUserProfile(), 8000, null, 'new order profile'),
         ]);
         setAllServices(servicesData);
         setProfile(userProfile);
