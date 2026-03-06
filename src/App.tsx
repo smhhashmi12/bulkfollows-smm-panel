@@ -10,7 +10,8 @@ import { authAPI } from './lib/api';
 import { CurrencyProvider } from './lib/CurrencyContext';
 import { NotificationProvider } from './lib/NotificationContext';
 import LiveChatWidget from './components/LiveChatWidget';
-import { Analytics } from "@vercel/analytics/next"
+import { Analytics } from '@vercel/analytics/react';
+
 
 // Define a type for the user object for better type safety.
 export type User = {
