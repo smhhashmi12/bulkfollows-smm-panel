@@ -1,0 +1,20 @@
+name: Check Config
+
+on: [push, pull_request]
+
+jobs:
+  check-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install deps
+        run: npm ci
+      - name: Run check-config
+        run: npm run check-config
+        env:
+          # Do not expose secrets here in CI; the workflow only checks for accidental exposure
+          NODE_OPTIONS: '--max-old-space-size=1024'

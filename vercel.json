@@ -1,0 +1,10 @@
+{
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/webhook/(.*)",
+      "destination": "/api/webhook/$1"
+    }
+  ]
+}
