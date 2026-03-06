@@ -10,6 +10,7 @@ import { authAPI } from './lib/api';
 import { CurrencyProvider } from './lib/CurrencyContext';
 import { NotificationProvider } from './lib/NotificationContext';
 import LiveChatWidget from './components/LiveChatWidget';
+import { Analytics } from "@vercel/analytics/next"
 
 // Define a type for the user object for better type safety.
 export type User = {
@@ -105,9 +106,9 @@ const App: React.FC = () => {
         // Token was auto-refreshed (session still valid)
         console.log('[Auth] TOKEN_REFRESHED - Session still valid');
         // User is still logged in, no need to fetch profile again
-      } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
-        // User signed out or was deleted
-        console.log('[Auth] User SIGNED_OUT or DELETED');
+      } else if (event === 'SIGNED_OUT') {
+        // User signed out
+        console.log('[Auth] User SIGNED_OUT');
         setCurrentUser(null);
       } else if (event === 'INITIAL_SESSION') {
         // This event fires when Supabase first loads the session from storage
@@ -279,12 +280,15 @@ const App: React.FC = () => {
   const shouldShowChat = !route.startsWith('#/admin');
 
   return (
-    <NotificationProvider>
-      <CurrencyProvider>
-        {renderPage()}
-        {shouldShowChat && <LiveChatWidget />}
-      </CurrencyProvider>
-    </NotificationProvider>
+    <>
+      <NotificationProvider>
+        <CurrencyProvider>
+          {renderPage()}
+          {shouldShowChat && <LiveChatWidget />}
+        </CurrencyProvider>
+      </NotificationProvider>
+      <Analytics />
+    </>
   );
 };
 
