@@ -37,6 +37,24 @@ type EditForm = {
   service_status: 'active' | 'inactive';
 };
 
+const parseApiResponse = async (response: Response) => {
+  const raw = await response.text();
+
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    if (response.status === 404) {
+      throw new Error('API route not found on the deployed server. Redeploy Vercel so /api/admin/* routes are available.');
+    }
+
+    throw new Error(`Server returned ${response.status} ${response.statusText} instead of JSON.`);
+  }
+};
+
 const ProviderServiceManagementPage: React.FC = () => {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [rows, setRows] = useState<ProviderServiceRow[]>([]);
@@ -69,7 +87,7 @@ const ProviderServiceManagementPage: React.FC = () => {
     if (statusFilter !== 'all') params.set('status', statusFilter);
 
     const response = await fetch(`/api/admin/provider-services?${params.toString()}`);
-    const result = await response.json();
+    const result = await parseApiResponse(response);
     if (!response.ok || !result.success) {
       throw new Error(result?.message || 'Failed to load provider services');
     }
@@ -145,7 +163,7 @@ const ProviderServiceManagementPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider_id: providerId, markup_percent: markupPercent }),
       });
-      const result = await response.json();
+      const result = await parseApiResponse(response);
       if (!response.ok || !result.success) {
         throw new Error(result?.message || 'Failed to sync provider services');
       }
@@ -178,7 +196,7 @@ const ProviderServiceManagementPage: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ provider_id: provider.id, markup_percent: markupPercent }),
         });
-        const result = await response.json();
+        const result = await parseApiResponse(response);
         if (!response.ok || !result.success) {
           failed += 1;
         } else {
@@ -226,7 +244,7 @@ const ProviderServiceManagementPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
       });
-      const result = await response.json();
+      const result = await parseApiResponse(response);
       if (!response.ok || !result.success) {
         throw new Error(result?.message || 'Failed to update provider service');
       }
