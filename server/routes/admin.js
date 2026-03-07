@@ -1,5 +1,10 @@
 import express from 'express';
-import { supabase, supabaseAdmin, supabaseConfigured } from '../lib/supabaseServer.js';
+import {
+  supabase,
+  supabaseAdmin,
+  supabaseConfigured,
+  supabaseAdminConfigured,
+} from '../lib/supabaseServer.js';
 
 const router = express.Router();
 
@@ -25,6 +30,21 @@ const toInteger = (value, fallback = 0) => {
 const getEmbeddedObject = (value) => {
   if (!value) return null;
   return Array.isArray(value) ? value[0] || null : value;
+};
+
+const getSupabaseServerError = (error, fallbackMessage = 'Internal server error') => {
+  const message = String(error?.message || error || '').trim();
+  if (message.toLowerCase().includes('invalid api key')) {
+    return {
+      status: 503,
+      message: 'Server Supabase key is invalid. Update SUPABASE_SERVICE_ROLE_KEY in Vercel project settings.',
+    };
+  }
+
+  return {
+    status: 500,
+    message: message || fallbackMessage,
+  };
 };
 
 // GET /api/admin/me - returns the user_profiles entry for the current session user
@@ -253,11 +273,15 @@ router.post('/sync-provider-services', async (req, res) => {
   console.log('[sync-services] Request received:', req.body);
   
   try {
-    if (!supabaseConfigured || !supabase) {
-      return res.status(503).json({ error: 'Supabase not configured' });
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({
+        success: false,
+        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
+      });
     }
 
     const { provider_id, markup_percent } = req.body;
+    const markupPercent = toNumber(markup_percent, 0);
 
     if (!provider_id) {
       return res.status(400).json({
@@ -267,13 +291,20 @@ router.post('/sync-provider-services', async (req, res) => {
     }
 
     // Get provider details
-    const { data: provider, error: providerError } = await supabase
+    const { data: provider, error: providerError } = await supabaseAdmin
       .from('providers')
       .select('id, api_url, api_key, api_secret, markup_percentage')
       .eq('id', provider_id)
       .single();
 
     if (providerError || !provider) {
+      if (providerError) {
+        const serverError = getSupabaseServerError(providerError, 'Provider lookup failed');
+        return res.status(serverError.status).json({
+          success: false,
+          message: serverError.message,
+        });
+      }
       return res.status(404).json({
         success: false,
         message: 'Provider not found'
@@ -380,7 +411,7 @@ router.post('/sync-provider-services', async (req, res) => {
 
     let serviceIdByName = new Map();
 
-    const { data: upsertedServices, error: upsertServicesError } = await supabase
+    const { data: upsertedServices, error: upsertServicesError } = await supabaseAdmin
       .from('services')
       .upsert(serviceUpserts, { onConflict: 'name' })
       .select('id, name');
@@ -393,14 +424,14 @@ router.post('/sync-provider-services', async (req, res) => {
       // Fallback for databases where services.name unique constraint is not yet applied.
       console.warn('[sync-services] Service upsert failed, using row-by-row fallback:', upsertServicesError.message);
       for (const row of serviceUpserts) {
-        const { data: existingService } = await supabase
+        const { data: existingService } = await supabaseAdmin
           .from('services')
           .select('id')
           .eq('name', row.name)
           .maybeSingle();
 
         if (existingService?.id) {
-          await supabase
+          await supabaseAdmin
             .from('services')
             .update({
               category: row.category,
@@ -414,7 +445,7 @@ router.post('/sync-provider-services', async (req, res) => {
             .eq('id', existingService.id);
           serviceIdByName.set(row.name, existingService.id);
         } else {
-          const { data: createdService, error: createServiceError } = await supabase
+          const { data: createdService, error: createServiceError } = await supabaseAdmin
             .from('services')
             .insert(row)
             .select('id, name')
@@ -433,7 +464,7 @@ router.post('/sync-provider-services', async (req, res) => {
 
     // Re-read service IDs by name from DB for reliability, independent of upsert response shape.
     const uniqueNames = Array.from(new Set(normalizedServices.map((item) => item.serviceName)));
-    const { data: dbServices, error: dbServicesError } = await supabase
+    const { data: dbServices, error: dbServicesError } = await supabaseAdmin
       .from('services')
       .select('id, name')
       .in('name', uniqueNames);
@@ -476,7 +507,7 @@ router.post('/sync-provider-services', async (req, res) => {
     });
     const dedupedMappings = Array.from(uniqueMappingMap.values());
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from('provider_services')
       .delete()
       .eq('provider_id', provider_id);
@@ -493,7 +524,7 @@ router.post('/sync-provider-services', async (req, res) => {
       });
     }
 
-    const { error: insertMappingsError } = await supabase
+    const { error: insertMappingsError } = await supabaseAdmin
       .from('provider_services')
       .insert(dedupedMappings);
 
@@ -506,7 +537,7 @@ router.post('/sync-provider-services', async (req, res) => {
       });
     }
 
-    await supabase
+    await supabaseAdmin
       .from('providers')
       .update({ last_sync: new Date().toISOString() })
       .eq('id', provider_id);
@@ -522,9 +553,10 @@ router.post('/sync-provider-services', async (req, res) => {
     });
   } catch (error) {
     console.error('[sync-services] Error:', error);
-    return res.status(500).json({
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({
       success: false,
-      message: error.message || 'Internal server error'
+      message: serverError.message,
     });
   }
 });
@@ -532,14 +564,17 @@ router.post('/sync-provider-services', async (req, res) => {
 // GET /api/admin/provider-services - list provider services with provider + system service details
 router.get('/provider-services', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabase) {
-      return res.status(503).json({ error: 'Supabase not configured' });
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({
+        success: false,
+        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
+      });
     }
 
     const { provider_id, category, status } = req.query;
 
     // Auto-repair old mappings that were saved without service_id
-    const orphanQuery = supabase
+    const orphanQuery = supabaseAdmin
       .from('provider_services')
       .select('id, provider_service_id')
       .is('service_id', null)
@@ -550,7 +585,7 @@ router.get('/provider-services', async (req, res) => {
     const { data: orphanMappings } = await orphanQuery;
 
     if (orphanMappings && orphanMappings.length > 0) {
-      const { data: systemServices } = await supabase
+      const { data: systemServices } = await supabaseAdmin
         .from('services')
         .select('id, description')
         .limit(10000);
@@ -570,14 +605,14 @@ router.get('/provider-services', async (req, res) => {
       for (const orphan of orphanMappings) {
         const linkedServiceId = serviceIdByProviderServiceId.get(String(orphan.provider_service_id || '').trim());
         if (!linkedServiceId) continue;
-        await supabase
+        await supabaseAdmin
           .from('provider_services')
           .update({ service_id: linkedServiceId, updated_at: new Date().toISOString() })
           .eq('id', orphan.id);
       }
     }
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('provider_services')
       .select(`
         id,
@@ -605,7 +640,8 @@ router.get('/provider-services', async (req, res) => {
     const { data, error } = await query;
     if (error) {
       console.error('[provider-services] list error:', error);
-      return res.status(500).json({ success: false, message: error.message });
+      const serverError = getSupabaseServerError(error, 'Failed to load provider services');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
     }
 
     const normalizedRows = (data || []).map((row) => ({
@@ -623,7 +659,7 @@ router.get('/provider-services', async (req, res) => {
 
     let serviceById = new Map();
     if (serviceIds.length > 0) {
-      const { data: servicesData } = await supabase
+      const { data: servicesData } = await supabaseAdmin
         .from('services')
         .select('id, name, category, status')
         .in('id', serviceIds);
@@ -640,7 +676,7 @@ router.get('/provider-services', async (req, res) => {
     // Fallback mapping when service_id is broken/legacy by reading provider service id from service descriptions.
     const unresolvedRows = mergedRows.filter((row) => !row.services);
     if (unresolvedRows.length > 0) {
-      const { data: allServicesForFallback } = await supabase
+      const { data: allServicesForFallback } = await supabaseAdmin
         .from('services')
         .select('id, name, category, status, description')
         .limit(20000);
@@ -669,15 +705,19 @@ router.get('/provider-services', async (req, res) => {
     return res.status(200).json({ success: true, services: filtered });
   } catch (error) {
     console.error('[provider-services] unexpected error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
   }
 });
 
 // PATCH /api/admin/provider-services/:id - update provider mapping fields
 router.patch('/provider-services/:id', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabase) {
-      return res.status(503).json({ error: 'Supabase not configured' });
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({
+        success: false,
+        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
+      });
     }
 
     const { id } = req.params;
@@ -700,7 +740,7 @@ router.patch('/provider-services/:id', async (req, res) => {
     if (status !== undefined) mappingUpdates.status = String(status);
     mappingUpdates.updated_at = new Date().toISOString();
 
-    const { data: updatedMapping, error: mappingError } = await supabase
+    const { data: updatedMapping, error: mappingError } = await supabaseAdmin
       .from('provider_services')
       .update(mappingUpdates)
       .eq('id', id)
@@ -708,6 +748,13 @@ router.patch('/provider-services/:id', async (req, res) => {
       .single();
 
     if (mappingError || !updatedMapping) {
+      if (mappingError) {
+        const serverError = getSupabaseServerError(mappingError, 'Failed to update provider mapping');
+        return res.status(serverError.status).json({
+          success: false,
+          message: serverError.message,
+        });
+      }
       return res.status(500).json({
         success: false,
         message: mappingError?.message || 'Failed to update provider mapping',
@@ -731,15 +778,16 @@ router.patch('/provider-services/:id', async (req, res) => {
       if (our_rate !== undefined) serviceUpdates.rate_per_1000 = toNumber(our_rate, 0);
       serviceUpdates.updated_at = new Date().toISOString();
 
-      const { error: serviceError } = await supabase
+      const { error: serviceError } = await supabaseAdmin
         .from('services')
         .update(serviceUpdates)
         .eq('id', updatedMapping.service_id);
 
       if (serviceError) {
-        return res.status(500).json({
+        const serverError = getSupabaseServerError(serviceError, 'Mapping updated but service update failed');
+        return res.status(serverError.status).json({
           success: false,
-          message: serviceError.message || 'Mapping updated but service update failed',
+          message: serverError.message,
         });
       }
     }
@@ -747,14 +795,15 @@ router.patch('/provider-services/:id', async (req, res) => {
     return res.status(200).json({ success: true, message: 'Provider service updated successfully' });
   } catch (error) {
     console.error('[provider-services] update error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
   }
 });
 
 router.get('/settings', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabaseAdmin) {
-      return res.status(503).json({ error: 'Supabase not configured' });
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
     }
 
     const { data, error } = await supabaseAdmin
@@ -785,8 +834,8 @@ router.get('/settings', async (req, res) => {
 
 router.post('/settings', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabaseAdmin) {
-      return res.status(503).json({ error: 'Supabase not configured' });
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
     }
 
     const payload = {
