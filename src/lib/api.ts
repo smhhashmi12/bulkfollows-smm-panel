@@ -73,6 +73,7 @@ export interface UserProfile {
   id: string;
   username: string;
   email: string;
+  api_key?: string | null;
   role: 'user' | 'admin';
   balance: number;
   total_spent: number;
@@ -130,6 +131,7 @@ export interface Provider {
   api_key: string;
   api_secret?: string;
   balance: number;
+  markup_percentage?: number | null;
   status: 'active' | 'inactive' | 'error';
   last_sync?: string;
   created_at?: string;

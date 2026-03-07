@@ -1,8 +1,40 @@
 import express from 'express';
 import crypto from 'crypto';
-import { supabase, supabaseConfigured } from '../lib/supabaseServer.js';
+import { supabaseAdmin, supabaseAdminConfigured } from '../lib/supabaseServer.js';
 
 const router = express.Router();
+
+const normalizePaymentStatus = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['success', 'completed', 'complete', 'paid'].includes(normalized)) return 'completed';
+  if (['failed', 'failure', 'error'].includes(normalized)) return 'failed';
+  if (['canceled', 'cancelled'].includes(normalized)) return 'canceled';
+  return 'pending';
+};
+
+async function findPaymentRecord(paymentId, fastpayOrderId, transactionId) {
+  const lookups = [
+    ['id', paymentId],
+    ['fastpay_order_id', fastpayOrderId],
+    ['transaction_id', transactionId],
+  ];
+
+  for (const [column, rawValue] of lookups) {
+    const value = String(rawValue || '').trim();
+    if (!value) continue;
+
+    const { data, error } = await supabaseAdmin
+      .from('payments')
+      .select('id, user_id, amount, status, transaction_id, fastpay_order_id, metadata')
+      .eq(column, value)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (data) return data;
+  }
+
+  return null;
+}
 
 // FastPay webhook receiver
 router.post('/', async (req, res) => {
@@ -20,62 +52,75 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Expected payload fields (best-effort): id, status, amount, metadata (contains user_id or email)
-    const providerTxnId = payload.id || payload.txn_id || null;
-    const status = payload.status || payload.event || 'unknown';
+    const providerTxnId = payload.transaction_id || payload.id || payload.txn_id || null;
+    const fastpayOrderId = payload.order_id || payload.reference || payload.order || null;
+    const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+    const paymentId = payload.payment_id || metadata.payment_id || fastpayOrderId || null;
+    const status = normalizePaymentStatus(payload.status || payload.event || 'pending');
     const amount = Number(payload.amount || 0);
-    const metadata = payload.metadata || {};
 
     // If Supabase isn't configured, skip DB work but accept the webhook so payment provider won't retry
-    if (!supabaseConfigured || !supabase) {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
       console.warn('Received webhook but Supabase not configured; skipping DB insert.');
       return res.json({ ok: true, note: 'Supabase not configured; webhook accepted but not processed.' });
     }
 
-    // Insert a payment log / record
-    const { data: paymentData, error: paymentError } = await supabase.from('payments').insert([{
-      provider: 'fastpay',
-      provider_txn_id: providerTxnId,
-      amount: amount,
-      status: status,
-      metadata: metadata,
-      created_at: new Date().toISOString()
-    }]);
-
-    if (paymentError) {
-      console.error('Error inserting payment record', paymentError);
-      // proceed but return 500
-      return res.status(500).json({ error: 'Failed to insert payment record' });
+    const paymentRecord = await findPaymentRecord(paymentId, fastpayOrderId, providerTxnId);
+    if (!paymentRecord) {
+      console.warn('FastPay webhook received for unknown payment', {
+        paymentId,
+        fastpayOrderId,
+        providerTxnId,
+      });
+      return res.json({ ok: true, note: 'No matching payment record found.' });
     }
 
-    // If payment succeeded and metadata contains a user identifier, credit balance
-    if (['success', 'completed', 'paid'].includes(String(status).toLowerCase())) {
-      const userId = metadata.user_id || metadata.user || null;
-      if (userId) {
-        // increment user balance by amount (assumes balance column exists and amount is consistent currency)
-        const { data: userData, error: userError } = await supabase
+    const mergedMetadata = {
+      ...(paymentRecord.metadata && typeof paymentRecord.metadata === 'object' ? paymentRecord.metadata : {}),
+      fastpay_webhook: payload,
+    };
+
+    const { data: updatedPayment, error: paymentError } = await supabaseAdmin
+      .from('payments')
+      .update({
+        status,
+        transaction_id: providerTxnId || paymentRecord.transaction_id,
+        fastpay_order_id: fastpayOrderId || paymentRecord.fastpay_order_id,
+        metadata: mergedMetadata,
+      })
+      .eq('id', paymentRecord.id)
+      .select('id, user_id, amount, status')
+      .single();
+
+    if (paymentError) {
+      console.error('Error updating payment record from webhook', paymentError);
+      return res.status(500).json({ error: 'Failed to update payment record' });
+    }
+
+    if (status === 'completed' && paymentRecord.status !== 'completed') {
+      const { data: userProfile, error: userError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('id, balance')
+        .eq('id', paymentRecord.user_id)
+        .single();
+
+      if (userError) {
+        console.error('Error fetching user for balance credit', userError);
+      } else if (userProfile) {
+        const creditAmount = Number(updatedPayment.amount || paymentRecord.amount || amount || 0);
+        const { error: updateError } = await supabaseAdmin
           .from('user_profiles')
-          .select('id, balance')
-          .eq('id', userId)
-          .limit(1);
+          .update({ balance: Number(userProfile.balance || 0) + creditAmount })
+          .eq('id', paymentRecord.user_id);
 
-        if (userError) console.error('Error fetching user for credit', userError);
-
-        const user = (userData && userData[0]) || null;
-        if (user) {
-          const newBalance = Number(user.balance || 0) + amount;
-          const { error: updateError } = await supabase
-            .from('user_profiles')
-            .update({ balance: newBalance })
-            .eq('id', userId);
-
-          if (updateError) console.error('Failed to update user balance', updateError);
+        if (updateError) {
+          console.error('Failed to update user balance', updateError);
         }
       }
     }
 
     // FastPay expects a 200-ish response for success
-    return res.json({ ok: true });
+    return res.json({ ok: true, paymentId: updatedPayment.id, status });
   } catch (err) {
     console.error('Webhook handler error', err);
     return res.status(500).json({ error: 'Internal server error' });

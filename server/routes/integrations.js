@@ -1,8 +1,25 @@
 import express from 'express';
-import { supabase, supabaseConfigured, supabaseAdmin } from '../lib/supabaseServer.js';
+import { supabaseAdmin, supabaseAdminConfigured } from '../lib/supabaseServer.js';
 
 const router = express.Router();
 const SUPABASE_QUERY_TIMEOUT_MS = 5000;
+
+const getApiKeyFromRequest = (req) => {
+  const directKey = req.headers['x-api-key'];
+  if (directKey) {
+    return String(directKey).trim();
+  }
+
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (authHeader) {
+    const [scheme, value] = String(authHeader).split(' ');
+    if (/^Bearer$/i.test(scheme) && value) {
+      return value.trim();
+    }
+  }
+
+  return '';
+};
 
 const extractProviderServiceId = (description) => {
   const text = String(description || '');
@@ -35,7 +52,7 @@ async function runTimedQuery(query, label) {
 // Fetches provider names using admin access (bypasses RLS)
 router.get('/provider-names', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabaseAdmin) {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'Service temporarily unavailable' });
     }
 
@@ -68,7 +85,7 @@ router.get('/provider-names', async (req, res) => {
 // Fetches all service names using admin access (bypasses RLS)
 router.get('/service-names', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabaseAdmin) {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'Service temporarily unavailable' });
     }
 
@@ -105,7 +122,7 @@ router.get('/service-names', async (req, res) => {
 // Fetches provider services with actual service names (bypasses RLS)
 router.get('/provider-services', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabaseAdmin) {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'Service temporarily unavailable' });
     }
 
@@ -177,15 +194,14 @@ router.get('/provider-services', async (req, res) => {
 // and return basic user info or allow order creation in a production implementation.
 router.post('/', async (req, res) => {
   try {
-    const apiKey = req.headers['x-api-key'];
+    const apiKey = getApiKeyFromRequest(req);
     if (!apiKey) return res.status(401).json({ error: 'Missing API key' });
 
-    if (!supabaseConfigured || !supabase) {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'Service temporarily unavailable (Supabase not configured on server)' });
     }
 
-    // Look up user by api_key column in user_profiles table (assumes such a column exists)
-    const { data: users, error } = await supabase
+    const { data: users, error } = await supabaseAdmin
       .from('user_profiles')
       .select('id, username, role, balance')
       .eq('api_key', apiKey)

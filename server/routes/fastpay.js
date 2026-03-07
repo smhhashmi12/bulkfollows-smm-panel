@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase, supabaseConfigured } from '../lib/supabaseServer.js';
+import { supabaseAdmin, supabaseAdminConfigured } from '../lib/supabaseServer.js';
 
 const router = express.Router();
 
@@ -7,7 +7,9 @@ const router = express.Router();
 // Body: { paymentId, amount, orderId(opt), customerEmail, customerName, returnUrl, cancelUrl }
 router.post('/create-order', async (req, res) => {
   try {
-    if (!supabaseConfigured || !supabase) return res.status(503).json({ error: 'Supabase not configured' });
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'Supabase admin client not configured' });
+    }
 
     const { paymentId, amount, customerEmail, customerName, returnUrl, cancelUrl } = req.body || {};
 
@@ -63,10 +65,11 @@ router.post('/create-order', async (req, res) => {
 
     // update payment record in Supabase
     try {
-      const { error: updateError } = await supabase.from('payments').update({
+      const { error: updateError } = await supabaseAdmin.from('payments').update({
         status: 'pending',
-        provider_txn_id: transactionId,
-        provider_order_id: orderId
+        transaction_id: transactionId,
+        fastpay_order_id: orderId,
+        payment_provider: 'fastpay'
       }).eq('id', paymentId);
       if (updateError) console.error('Failed to update payment with FastPay details', updateError);
     } catch (e) {

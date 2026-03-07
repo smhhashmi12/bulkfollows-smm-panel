@@ -13,11 +13,12 @@ const ApiPage: React.FC = () => {
     setError('');
     try {
       const profile = await authAPI.getUserProfile();
-      if (profile) {
-        // Generate API key from username (in production, this should be stored in DB)
-        setApiKey(`sk_${profile.username.split('').reverse().join('')}_${profile.id.slice(0, 8)}`);
-      } else {
+      if (profile?.api_key) {
+        setApiKey(profile.api_key);
+      } else if (!profile) {
         setError('Failed to load profile');
+      } else {
+        setError('API key is not configured for this account yet. Run the latest database migration.');
       }
     } catch (err: any) {
       const msg = isTimeoutError(err) ? 'Request timed out. Please refresh.' : (err.message || 'Failed to load API key');
@@ -83,21 +84,21 @@ const ApiPage: React.FC = () => {
             <div className="space-y-4 text-sm text-gray-300">
               <div>
                 <h4 className="font-bold text-white mb-2">Base URL</h4>
-                <code className="bg-black/20 px-2 py-1 rounded">{window.location.origin}/api</code>
+                <code className="bg-black/20 px-2 py-1 rounded">{window.location.origin}/api/integrations</code>
               </div>
               
               <div>
                 <h4 className="font-bold text-white mb-2">Authentication</h4>
-                <p>Include your API key in the Authorization header:</p>
+                <p>Send your API key in either the custom header or Bearer auth header:</p>
+                <code className="bg-black/20 px-2 py-1 rounded block mt-2">x-api-key: YOUR_API_KEY</code>
                 <code className="bg-black/20 px-2 py-1 rounded block mt-2">Authorization: Bearer YOUR_API_KEY</code>
               </div>
 
               <div>
                 <h4 className="font-bold text-white mb-2">Endpoints</h4>
                 <ul className="list-disc list-inside space-y-1">
-                  <li><code className="bg-black/20 px-1">GET /api/services</code> - Get available services</li>
-                  <li><code className="bg-black/20 px-1">POST /api/orders</code> - Create a new order</li>
-                  <li><code className="bg-black/20 px-1">GET /api/orders</code> - Get your orders</li>
+                  <li><code className="bg-black/20 px-1">POST /api/integrations</code> - Verify your API key and return your account snapshot</li>
+                  <li><code className="bg-black/20 px-1">GET /api/integrations/provider-services</code> - Server-side provider mapping feed used by the order flow</li>
                 </ul>
               </div>
             </div>

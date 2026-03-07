@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE NOT NULL,
+  api_key TEXT UNIQUE,
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   balance DECIMAL(10, 2) DEFAULT 0.00,
   total_spent DECIMAL(10, 2) DEFAULT 0.00,
@@ -22,6 +23,8 @@ CREATE TABLE IF NOT EXISTS public.services (
   rate_per_1000 DECIMAL(10, 2) NOT NULL,
   min_quantity INTEGER DEFAULT 100,
   max_quantity INTEGER DEFAULT 10000,
+  completion_time INTEGER DEFAULT 24,
+  time_pricing JSONB DEFAULT '{"6": 2.0, "12": 1.5, "24": 1.0, "48": 0.8, "72": 0.7}'::jsonb,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -32,10 +35,30 @@ CREATE TABLE IF NOT EXISTS public.providers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   api_key TEXT,
+  api_secret TEXT,
   api_url TEXT,
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  balance DECIMAL(10, 2) DEFAULT 0.00,
+  markup_percentage DECIMAL(5, 2) DEFAULT 0.00,
+  last_sync TIMESTAMP WITH TIME ZONE,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'error')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Provider Service Mapping Table
+CREATE TABLE IF NOT EXISTS public.provider_services (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  provider_id UUID NOT NULL REFERENCES public.providers(id) ON DELETE CASCADE,
+  service_id UUID REFERENCES public.services(id) ON DELETE SET NULL,
+  provider_service_id TEXT NOT NULL,
+  provider_rate DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  our_rate DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  min_quantity INTEGER DEFAULT 1,
+  max_quantity INTEGER DEFAULT 10000,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (provider_id, provider_service_id)
 );
 
 -- Orders Table
@@ -47,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   link TEXT NOT NULL,
   quantity INTEGER NOT NULL,
   charge DECIMAL(10, 2) NOT NULL,
+  delivery_time INTEGER DEFAULT 24,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'canceled', 'failed')),
   provider_order_id TEXT,
   start_count INTEGER,
@@ -82,6 +106,85 @@ CREATE TABLE IF NOT EXISTS public.payment_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Provider/platform earnings tracking
+CREATE TABLE IF NOT EXISTS public.platform_earnings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id UUID NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.user_profiles(id) ON DELETE CASCADE,
+  provider_id UUID REFERENCES public.providers(id) ON DELETE SET NULL,
+  customer_charge DECIMAL(10, 2) NOT NULL,
+  provider_cost DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  platform_profit DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  platform_commission DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'canceled')),
+  order_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  completion_date TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (order_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.provider_payouts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  provider_id UUID NOT NULL REFERENCES public.providers(id) ON DELETE CASCADE,
+  total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  payout_method TEXT NOT NULL,
+  payout_account TEXT,
+  period_from TIMESTAMP WITH TIME ZONE NOT NULL,
+  period_to TIMESTAMP WITH TIME ZONE NOT NULL,
+  reference_number TEXT NOT NULL UNIQUE,
+  processed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.provider_transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  provider_id UUID NOT NULL REFERENCES public.providers(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('earning', 'payout', 'refund', 'adjustment')),
+  amount DECIMAL(10, 2) NOT NULL,
+  description TEXT,
+  payout_id UUID REFERENCES public.provider_payouts(id) ON DELETE SET NULL,
+  balance_before DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  balance_after DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.platform_summary (
+  date DATE PRIMARY KEY,
+  total_customer_charges DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  total_provider_costs DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  gross_profit DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  net_profit DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  total_orders INTEGER NOT NULL DEFAULT 0,
+  successful_orders INTEGER NOT NULL DEFAULT 0,
+  failed_orders INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Helper for generating stable API keys for user-facing integrations
+CREATE OR REPLACE FUNCTION public.generate_api_key()
+RETURNS TEXT AS $$
+DECLARE
+  generated_key TEXT;
+BEGIN
+  LOOP
+    generated_key := 'sk_' || substr(md5(uuid_generate_v4()::text || clock_timestamp()::text || random()::text), 1, 32);
+    EXIT WHEN NOT EXISTS (
+      SELECT 1
+      FROM public.user_profiles
+      WHERE api_key = generated_key
+    );
+  END LOOP;
+
+  RETURN generated_key;
+END;
+$$ LANGUAGE plpgsql;
+
+ALTER TABLE public.user_profiles
+  ALTER COLUMN api_key SET DEFAULT public.generate_api_key();
+
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON public.orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
@@ -89,16 +192,31 @@ CREATE INDEX IF NOT EXISTS idx_orders_created_at ON public.orders(created_at DES
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_transaction_id ON public.payments(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_payments_fastpay_order_id ON public.payments(fastpay_order_id);
 CREATE INDEX IF NOT EXISTS idx_services_category ON public.services(category);
 CREATE INDEX IF NOT EXISTS idx_services_status ON public.services(status);
+CREATE INDEX IF NOT EXISTS idx_provider_services_provider_id ON public.provider_services(provider_id);
+CREATE INDEX IF NOT EXISTS idx_provider_services_service_id ON public.provider_services(service_id);
+CREATE INDEX IF NOT EXISTS idx_provider_services_status ON public.provider_services(status);
+CREATE INDEX IF NOT EXISTS idx_platform_earnings_provider_id ON public.platform_earnings(provider_id);
+CREATE INDEX IF NOT EXISTS idx_platform_earnings_order_date ON public.platform_earnings(order_date DESC);
+CREATE INDEX IF NOT EXISTS idx_provider_payouts_provider_id ON public.provider_payouts(provider_id);
+CREATE INDEX IF NOT EXISTS idx_provider_payouts_status ON public.provider_payouts(status);
+CREATE INDEX IF NOT EXISTS idx_provider_transactions_provider_id ON public.provider_transactions(provider_id);
+CREATE INDEX IF NOT EXISTS idx_platform_summary_updated_at ON public.platform_summary(updated_at DESC);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.providers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.provider_services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.platform_earnings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.provider_payouts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.provider_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.platform_summary ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for user_profiles
 CREATE POLICY "Users can view their own profile"
@@ -138,6 +256,11 @@ CREATE POLICY "Admins can manage providers"
   ON public.providers FOR ALL
   USING (public.is_admin(auth.uid()));
 
+CREATE POLICY "Admins can manage provider services"
+  ON public.provider_services FOR ALL
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
 -- RLS Policies for orders
 CREATE POLICY "Users can view their own orders"
   ON public.orders FOR SELECT
@@ -172,6 +295,26 @@ CREATE POLICY "Admins can view all payments"
 CREATE POLICY "Admins can view all payment logs"
   ON public.payment_logs FOR SELECT
   USING (public.is_admin(auth.uid()));
+
+CREATE POLICY "Admins can manage platform earnings"
+  ON public.platform_earnings FOR ALL
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+CREATE POLICY "Admins can manage provider payouts"
+  ON public.provider_payouts FOR ALL
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+CREATE POLICY "Admins can manage provider transactions"
+  ON public.provider_transactions FOR ALL
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+CREATE POLICY "Admins can manage platform summary"
+  ON public.platform_summary FOR ALL
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
 
 -- Function to automatically create user profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -251,10 +394,22 @@ CREATE TRIGGER update_user_profiles_updated_at BEFORE UPDATE ON public.user_prof
 CREATE TRIGGER update_services_updated_at BEFORE UPDATE ON public.services
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+CREATE TRIGGER update_providers_updated_at BEFORE UPDATE ON public.providers
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER update_provider_services_updated_at BEFORE UPDATE ON public.provider_services
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
 CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON public.orders
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON public.payments
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER update_provider_payouts_updated_at BEFORE UPDATE ON public.provider_payouts
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER update_platform_summary_updated_at BEFORE UPDATE ON public.platform_summary
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- App Settings (singleton store for site-wide configuration)

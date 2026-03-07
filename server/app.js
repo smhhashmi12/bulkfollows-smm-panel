@@ -14,6 +14,36 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.use((req, res, next) => {
+  const isServerRoute =
+    req.originalUrl.startsWith('/api/') || req.originalUrl.startsWith('/webhook/');
+
+  if (!isServerRoute) {
+    return next();
+  }
+
+  const startedAt = Date.now();
+  const requestId = req.headers['x-vercel-id'] || req.headers['x-request-id'] || '';
+
+  console.log('[HTTP] start', {
+    method: req.method,
+    path: req.originalUrl,
+    requestId,
+  });
+
+  res.on('finish', () => {
+    console.log('[HTTP] finish', {
+      method: req.method,
+      path: req.originalUrl,
+      requestId,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+
+  next();
+});
+
 if (process.env.SERVE_STATIC === '1' || process.env.NODE_ENV === 'production' || process.env.VERCEL) {
   const distPath = path.join(process.cwd(), 'dist');
   app.use(express.static(distPath));
@@ -24,6 +54,11 @@ if (process.env.SERVE_STATIC === '1' || process.env.NODE_ENV === 'production' ||
 }
 
 async function registerRoutes() {
+  console.log('[Server] Registering routes', {
+    vercel: Boolean(process.env.VERCEL),
+    nodeEnv: process.env.NODE_ENV || 'development',
+  });
+
   const [
     { default: servicesRouter },
     { default: webhookRouter },
