@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { getSessionUser, supabase } from '../../lib/supabase';
 import { chatAPI, ChatChannelWithProfile, ChatMessage } from '../../lib/chat';
 import { chatPlatforms, getChatPlatform, ChatPlatformId } from '../../components/chat/chatConfig';
 
@@ -64,8 +64,8 @@ const AdminChatPage: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase.auth.getUser();
-      setAdminId(data.user?.id ?? null);
+      const user = await getSessionUser();
+      setAdminId(user?.id ?? null);
       await loadChannels();
     };
     init();

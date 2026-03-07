@@ -1,13 +1,27 @@
-import { supabase } from './supabase';
+import { getSessionUser, supabase, withSupabaseTimeout } from './supabase';
 import type { User } from '../App';
 
 const PROVIDER_SERVICES_TIMEOUT_MS = 5000;
 const PROVIDER_SERVICES_CACHE_TTL_MS = 60000;
 const PROVIDER_SERVICES_FAILURE_BACKOFF_MS = 15000;
+const AUTH_LOOKUP_TIMEOUT_MS = 8000;
+const SUPABASE_QUERY_TIMEOUT_MS = 12000;
 
 let providerServicesCache: any[] = [];
 let providerServicesCacheExpiresAt = 0;
 let providerServicesFailureBackoffUntil = 0;
+
+async function getAuthenticatedUser() {
+  const user = await getSessionUser(AUTH_LOOKUP_TIMEOUT_MS);
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+  return user;
+}
+
+async function runSupabaseQuery<T>(operation: PromiseLike<T>, label: string) {
+  return withSupabaseTimeout(operation, label, SUPABASE_QUERY_TIMEOUT_MS);
+}
 
 async function getProviderServicesSnapshot() {
   const now = Date.now();
@@ -124,34 +138,47 @@ export interface Provider {
 // Auth Functions
 export const authAPI = {
   async signUp(email: string, password: string, username: string) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username,
+    const { data, error } = await runSupabaseQuery(
+      supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username,
+          },
         },
-      },
-    });
+      }),
+      'auth sign up'
+    );
 
     if (error) throw error;
 
     // Update username in profile
     if (data.user) {
-      await supabase
-        .from('user_profiles')
-        .update({ username })
-        .eq('id', data.user.id);
+      const { error: profileError } = await runSupabaseQuery(
+        supabase
+          .from('user_profiles')
+          .update({ username })
+          .eq('id', data.user.id),
+        'auth sign up profile update'
+      );
+
+      if (profileError) {
+        throw profileError;
+      }
     }
 
     return data;
   },
 
   async signIn(email: string, password: string) {
-    const res = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const res = await runSupabaseQuery(
+      supabase.auth.signInWithPassword({
+        email,
+        password,
+      }),
+      'auth sign in'
+    );
 
     // supabase-js returns shape { data, error }
     // Normalize and provide more actionable error messages for the UI and logs
@@ -176,19 +203,22 @@ export const authAPI = {
   },
 
   async signOut() {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await runSupabaseQuery(supabase.auth.signOut(), 'auth sign out');
     if (error) throw error;
   },
 
   async getCurrentUser(): Promise<User | null> {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getSessionUser(AUTH_LOOKUP_TIMEOUT_MS);
     if (!user) return null;
 
-    const { data: profile, error } = await supabase
-      .from('user_profiles')
-      .select('username, role')
-      .eq('id', user.id)
-      .maybeSingle();
+    const { data: profile, error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .select('username, role')
+        .eq('id', user.id)
+        .maybeSingle(),
+      'auth current user profile'
+    );
 
     if (error) throw error;
 
@@ -202,14 +232,17 @@ export const authAPI = {
   },
 
   async getUserProfile(): Promise<UserProfile | null> {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getSessionUser(AUTH_LOOKUP_TIMEOUT_MS);
     if (!user) return null;
 
-    const { data: profile, error } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    const { data: profile, error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle(),
+      'auth user profile'
+    );
 
     if (error) throw error;
 
@@ -231,17 +264,20 @@ export const servicesAPI = {
       query = query.eq('category', category);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await runSupabaseQuery(query, 'services list');
     if (error) throw error;
     return data as Service[];
   },
 
   async getService(id: string) {
-    const { data, error } = await supabase
-      .from('services')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('services')
+        .select('*')
+        .eq('id', id)
+        .single(),
+      'service detail'
+    );
 
     if (error) throw error;
     return data as Service;
@@ -324,8 +360,7 @@ export const ordersAPI = {
     deliveryTime: number = 24,
     providerId?: string
   ) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
+    const user = await getAuthenticatedUser();
 
     // Get service details with real data from database
     const service = await servicesAPI.getService(serviceId);
@@ -341,61 +376,74 @@ export const ordersAPI = {
     }
 
     // Create order with delivery time
-    const { data, error } = await supabase
-      .from('orders')
-      .insert({
-        user_id: user.id,
-        service_id: serviceId,
-        provider_id: providerId || null,
-        link,
-        quantity,
-        charge,
-        delivery_time: deliveryTime,
-        status: 'processing',
-      })
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('orders')
+        .insert({
+          user_id: user.id,
+          service_id: serviceId,
+          provider_id: providerId || null,
+          link,
+          quantity,
+          charge,
+          delivery_time: deliveryTime,
+          status: 'processing',
+        })
+        .select()
+        .single(),
+      'create order'
+    );
 
     if (error) throw error;
 
     // Deduct balance and update spent
-    await supabase
-      .from('user_profiles')
-      .update({
-        balance: profile.balance - charge,
-        total_spent: profile.total_spent + charge,
-      })
-      .eq('id', user.id);
+    const { error: balanceError } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .update({
+          balance: profile.balance - charge,
+          total_spent: profile.total_spent + charge,
+        })
+        .eq('id', user.id),
+      'order balance update'
+    );
+
+    if (balanceError) throw balanceError;
 
     return data as Order;
   },
 
   async getOrders() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
+    const user = await getAuthenticatedUser();
 
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        *,
-        service:services(*)
-      `)
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('orders')
+        .select(`
+          *,
+          service:services(*)
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false }),
+      'user orders list'
+    );
 
     if (error) throw error;
     return data as Order[];
   },
 
   async getOrder(id: string) {
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        *,
-        service:services(*)
-      `)
-      .eq('id', id)
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('orders')
+        .select(`
+          *,
+          service:services(*)
+        `)
+        .eq('id', id)
+        .single(),
+      'order detail'
+    );
 
     if (error) throw error;
     return data as Order;
@@ -405,38 +453,42 @@ export const ordersAPI = {
 // Payments Functions
 export const paymentsAPI = {
   async createPayment(amount: number, paymentMethod: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
+    const user = await getAuthenticatedUser();
 
     const fee = amount * 0.02; // 2% processing fee
     const total = amount + fee;
 
-    const { data, error } = await supabase
-      .from('payments')
-      .insert({
-        user_id: user.id,
-        amount,
-        fee,
-        total,
-        payment_method: paymentMethod,
-        payment_provider: 'fastpay',
-      })
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('payments')
+        .insert({
+          user_id: user.id,
+          amount,
+          fee,
+          total,
+          payment_method: paymentMethod,
+          payment_provider: 'fastpay',
+        })
+        .select()
+        .single(),
+      'create payment'
+    );
 
     if (error) throw error;
     return data as Payment;
   },
 
   async getPayments() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
+    const user = await getAuthenticatedUser();
 
-    const { data, error } = await supabase
-      .from('payments')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('payments')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false }),
+      'user payments list'
+    );
 
     if (error) throw error;
     return data as Payment[];
@@ -456,31 +508,44 @@ export const paymentsAPI = {
       updateData.fastpay_order_id = fastpayOrderId;
     }
 
-    const { data, error } = await supabase
-      .from('payments')
-      .update(updateData)
-      .eq('id', paymentId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('payments')
+        .update(updateData)
+        .eq('id', paymentId)
+        .select()
+        .single(),
+      'payment status update'
+    );
 
     if (error) throw error;
 
     // If payment completed, update user balance
     if (status === 'completed') {
       const payment = data as Payment;
-      const { data: profileData } = await supabase
-        .from('user_profiles')
-        .select('balance')
-        .eq('id', payment.user_id)
-        .single();
+      const { data: profileData, error: profileError } = await runSupabaseQuery(
+        supabase
+          .from('user_profiles')
+          .select('balance')
+          .eq('id', payment.user_id)
+          .single(),
+        'payment profile lookup'
+      );
+
+      if (profileError) throw profileError;
 
       if (profileData) {
-        await supabase
-          .from('user_profiles')
-          .update({
-            balance: profileData.balance + payment.amount,
-          })
-          .eq('id', payment.user_id);
+        const { error: updateBalanceError } = await runSupabaseQuery(
+          supabase
+            .from('user_profiles')
+            .update({
+              balance: profileData.balance + payment.amount,
+            })
+            .eq('id', payment.user_id),
+          'payment balance credit'
+        );
+
+        if (updateBalanceError) throw updateBalanceError;
       }
     }
 
@@ -492,185 +557,236 @@ export const paymentsAPI = {
 export const adminAPI = {
   // User Management
   async getAllUsers() {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      'admin users list'
+    );
     if (error) throw error;
     return data as UserProfile[];
   },
 
   async updateUserBalance(userId: string, balance: number) {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .update({ balance })
-      .eq('id', userId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .update({ balance })
+        .eq('id', userId)
+        .select()
+        .single(),
+      'admin user balance update'
+    );
     if (error) throw error;
     return data as UserProfile;
   },
 
   async updateUserRole(userId: string, role: 'user' | 'admin') {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .update({ role })
-      .eq('id', userId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .update({ role })
+        .eq('id', userId)
+        .select()
+        .single(),
+      'admin user role update'
+    );
     if (error) throw error;
     return data as UserProfile;
   },
 
   async deleteUser(userId: string) {
-    const { error } = await supabase
-      .from('user_profiles')
-      .delete()
-      .eq('id', userId);
+    const { error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .delete()
+        .eq('id', userId),
+      'admin user delete'
+    );
     if (error) throw error;
   },
 
   // Service Management
   async getAllServices() {
-    const { data, error } = await supabase
-      .from('services')
-      .select('*')
-      .order('category', { ascending: true })
-      .order('name', { ascending: true });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('services')
+        .select('*')
+        .order('category', { ascending: true })
+        .order('name', { ascending: true }),
+      'admin services list'
+    );
     if (error) throw error;
     return data as Service[];
   },
 
   async createService(service: Omit<Service, 'id' | 'created_at' | 'updated_at'>) {
-    const { data, error } = await supabase
-      .from('services')
-      .insert(service)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('services')
+        .insert(service)
+        .select()
+        .single(),
+      'admin service create'
+    );
     if (error) throw error;
     return data as Service;
   },
 
   async updateService(serviceId: string, updates: Partial<Service>) {
-    const { data, error } = await supabase
-      .from('services')
-      .update(updates)
-      .eq('id', serviceId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('services')
+        .update(updates)
+        .eq('id', serviceId)
+        .select()
+        .single(),
+      'admin service update'
+    );
     if (error) throw error;
     return data as Service;
   },
 
   async deleteService(serviceId: string) {
-    const { error } = await supabase
-      .from('services')
-      .delete()
-      .eq('id', serviceId);
+    const { error } = await runSupabaseQuery(
+      supabase
+        .from('services')
+        .delete()
+        .eq('id', serviceId),
+      'admin service delete'
+    );
     if (error) throw error;
   },
 
   // Provider Management
   async getAllProviders() {
-    const { data, error } = await supabase
-      .from('providers')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      'admin providers list'
+    );
     if (error) throw error;
     return data;
   },
 
   async createProvider(provider: any) {
-    const { data, error } = await supabase
-      .from('providers')
-      .insert(provider)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .insert(provider)
+        .select()
+        .single(),
+      'admin provider create'
+    );
     if (error) throw error;
     return data;
   },
 
   async updateProvider(providerId: string, updates: any) {
-    const { data, error } = await supabase
-      .from('providers')
-      .update(updates)
-      .eq('id', providerId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .update(updates)
+        .eq('id', providerId)
+        .select()
+        .single(),
+      'admin provider update'
+    );
     if (error) throw error;
     return data;
   },
 
   async deleteProvider(providerId: string) {
-    const { error } = await supabase
-      .from('providers')
-      .delete()
-      .eq('id', providerId);
+    const { error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .delete()
+        .eq('id', providerId),
+      'admin provider delete'
+    );
     if (error) throw error;
   },
 
   // Order Management
   async getAllOrders() {
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        *,
-        service:services(*),
-        user:user_profiles(username, email)
-      `)
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('orders')
+        .select(`
+          *,
+          service:services(*),
+          user:user_profiles(username, email)
+        `)
+        .order('created_at', { ascending: false }),
+      'admin orders list'
+    );
     if (error) throw error;
     return data;
   },
 
   async updateOrderStatus(orderId: string, status: Order['status']) {
-    const { data, error } = await supabase
-      .from('orders')
-      .update({ status })
-      .eq('id', orderId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('orders')
+        .update({ status })
+        .eq('id', orderId)
+        .select()
+        .single(),
+      'admin order status update'
+    );
     if (error) throw error;
     return data as Order;
   },
 
   // Payment Logs
   async getAllPayments() {
-    const { data, error } = await supabase
-      .from('payments')
-      .select(`
-        *,
-        user:user_profiles(username, email)
-      `)
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('payments')
+        .select(`
+          *,
+          user:user_profiles(username, email)
+        `)
+        .order('created_at', { ascending: false }),
+      'admin payments list'
+    );
     if (error) throw error;
     return data;
   },
 
   async getPaymentLogs() {
-    const { data, error } = await supabase
-      .from('payment_logs')
-      .select(`
-        *,
-        user:user_profiles(username, email),
-        payment:payments(*)
-      `)
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('payment_logs')
+        .select(`
+          *,
+          user:user_profiles(username, email),
+          payment:payments(*)
+        `)
+        .order('created_at', { ascending: false }),
+      'admin payment logs'
+    );
     if (error) throw error;
     return data;
   },
 
   async createPaymentLog(paymentId: string, userId: string, action: string, details: any) {
-    const { data, error } = await supabase
-      .from('payment_logs')
-      .insert({
-        payment_id: paymentId,
-        user_id: userId,
-        action,
-        details,
-      })
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('payment_logs')
+        .insert({
+          payment_id: paymentId,
+          user_id: userId,
+          action,
+          details,
+        })
+        .select()
+        .single(),
+      'admin payment log create'
+    );
     if (error) throw error;
     return data;
   },
@@ -678,11 +794,28 @@ export const adminAPI = {
   // Dashboard Statistics
   async getDashboardStats() {
     const [usersResult, ordersResult, paymentsResult, servicesResult] = await Promise.all([
-      supabase.from('user_profiles').select('id', { count: 'exact', head: true }),
-      supabase.from('orders').select('id, status, charge', { count: 'exact' }),
-      supabase.from('payments').select('id, amount, status', { count: 'exact' }),
-      supabase.from('services').select('id', { count: 'exact', head: true }),
+      runSupabaseQuery(
+        supabase.from('user_profiles').select('id', { count: 'exact', head: true }),
+        'admin dashboard users count'
+      ),
+      runSupabaseQuery(
+        supabase.from('orders').select('id, status, charge', { count: 'exact' }),
+        'admin dashboard orders'
+      ),
+      runSupabaseQuery(
+        supabase.from('payments').select('id, amount, status', { count: 'exact' }),
+        'admin dashboard payments'
+      ),
+      runSupabaseQuery(
+        supabase.from('services').select('id', { count: 'exact', head: true }),
+        'admin dashboard services count'
+      ),
     ]);
+
+    if (usersResult.error) throw usersResult.error;
+    if (ordersResult.error) throw ordersResult.error;
+    if (paymentsResult.error) throw paymentsResult.error;
+    if (servicesResult.error) throw servicesResult.error;
 
     const totalRevenue = paymentsResult.data
       ?.filter(p => p.status === 'completed')
@@ -706,44 +839,56 @@ export const adminAPI = {
 
   // Get total users count
   async getUsersCount() {
-    const { count, error } = await supabase
-      .from('user_profiles')
-      .select('id', { count: 'exact', head: true });
+    const { count, error } = await runSupabaseQuery(
+      supabase
+        .from('user_profiles')
+        .select('id', { count: 'exact', head: true }),
+      'admin users count'
+    );
     if (error) throw error;
     return count || 0;
   },
 
   // Get total support tickets count (open tickets)
   async getSupportTicketsCount() {
-    const { count, error } = await supabase
-      .from('support_tickets')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'open');
+    const { count, error } = await runSupabaseQuery(
+      supabase
+        .from('support_tickets')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'open'),
+      'admin support tickets count'
+    );
     if (error) throw error;
     return count || 0;
   },
 
   // Get all support tickets
   async getAllSupportTickets() {
-    const { data, error } = await supabase
-      .from('support_tickets')
-      .select(`
-        *,
-        user:user_profiles(username, email)
-      `)
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('support_tickets')
+        .select(`
+          *,
+          user:user_profiles(username, email)
+        `)
+        .order('created_at', { ascending: false }),
+      'support tickets list'
+    );
     if (error) throw error;
     return data;
   },
 
   // Update support ticket
   async updateSupportTicket(ticketId: string, updates: any) {
-    const { data, error } = await supabase
-      .from('support_tickets')
-      .update(updates)
-      .eq('id', ticketId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('support_tickets')
+        .update(updates)
+        .eq('id', ticketId)
+        .select()
+        .single(),
+      'support ticket update'
+    );
     if (error) throw error;
     return data;
   },
@@ -759,50 +904,65 @@ export const adminAPI = {
 
   // Announcements Management
   async getAllAnnouncements() {
-    const { data, error } = await supabase
-      .from('announcements')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('announcements')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      'announcements list'
+    );
     if (error) throw error;
     return data;
   },
 
   async getPublishedAnnouncements() {
-    const { data, error } = await supabase
-      .from('announcements')
-      .select('*')
-      .eq('status', 'published')
-      .order('created_at', { ascending: false });
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('announcements')
+        .select('*')
+        .eq('status', 'published')
+        .order('created_at', { ascending: false }),
+      'published announcements'
+    );
     if (error) throw error;
     return data;
   },
 
   async createAnnouncement(announcement: any) {
-    const { data, error } = await supabase
-      .from('announcements')
-      .insert(announcement)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('announcements')
+        .insert(announcement)
+        .select()
+        .single(),
+      'announcement create'
+    );
     if (error) throw error;
     return data;
   },
 
   async updateAnnouncement(announcementId: string, updates: any) {
-    const { data, error } = await supabase
-      .from('announcements')
-      .update(updates)
-      .eq('id', announcementId)
-      .select()
-      .single();
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('announcements')
+        .update(updates)
+        .eq('id', announcementId)
+        .select()
+        .single(),
+      'announcement update'
+    );
     if (error) throw error;
     return data;
   },
 
   async deleteAnnouncement(announcementId: string) {
-    const { error } = await supabase
-      .from('announcements')
-      .delete()
-      .eq('id', announcementId);
+    const { error } = await runSupabaseQuery(
+      supabase
+        .from('announcements')
+        .delete()
+        .eq('id', announcementId),
+      'announcement delete'
+    );
     if (error) throw error;
   },
 

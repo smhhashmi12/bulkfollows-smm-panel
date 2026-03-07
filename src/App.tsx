@@ -163,45 +163,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Refresh token proactively and on window focus to keep session alive
-  useEffect(() => {
-    if (!currentUser) {
-      return;
-    }
-
-    // Refresh token immediately
-    const refreshToken = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.refreshSession();
-        if (error) {
-          console.warn('[Token Refresh] Failed:', error);
-        } else if (session) {
-          console.log('[Token Refresh] Success - token refreshed');
-        }
-      } catch (error) {
-        console.error('[Token Refresh] Error:', error);
-      }
-    };
-
-    refreshToken();
-
-    // Refresh every 3 minutes (more aggressive than 5 mins for better reliability)
-    const tokenRefreshInterval = setInterval(refreshToken, 3 * 60 * 1000);
-
-    // Also refresh when window gains focus
-    const handleWindowFocus = () => {
-      console.log('[Auth] Window focused - checking session...');
-      refreshToken();
-    };
-
-    window.addEventListener('focus', handleWindowFocus);
-
-    return () => {
-      clearInterval(tokenRefreshInterval);
-      window.removeEventListener('focus', handleWindowFocus);
-    };
-  }, [currentUser]);
-
   useEffect(() => {
     const handleHashChange = () => {
       setRoute(window.location.hash);

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { adminAPI } from '../../lib/api';
+import { getSessionUser, supabase, withSupabaseTimeout } from '../../lib/supabase';
 
 interface Ticket {
   id: string;
@@ -50,26 +51,27 @@ const SupportPage: React.FC = () => {
     }
 
     try {
-      // Save ticket to database via Supabase
-      const { supabase } = await import('../../lib/supabase');
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getSessionUser();
       
       if (!user) {
         alert('You must be logged in to create a ticket');
         return;
       }
 
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .insert({
-          user_id: user.id,
-          subject: newSubject,
-          message: newMessage,
-          status: 'open',
-          priority: 'medium',
-        })
-        .select()
-        .single();
+      const { data, error } = await withSupabaseTimeout(
+        supabase
+          .from('support_tickets')
+          .insert({
+            user_id: user.id,
+            subject: newSubject,
+            message: newMessage,
+            status: 'open',
+            priority: 'medium',
+          })
+          .select()
+          .single(),
+        'create support ticket'
+      );
 
       if (error) throw error;
 

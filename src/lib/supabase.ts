@@ -1,5 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-import { timeout } from './utils';
+import { createClient, type User } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -26,18 +25,62 @@ const customStorage = {
   }
 };
 
-const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
-  if (init.signal) {
-    return fetch(input, init);
-  }
-  const { signal, timer, clear } = timeout(FETCH_TIMEOUT_MS);
+export async function withSupabaseTimeout<T>(
+  promise: PromiseLike<T>,
+  label: string,
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
   try {
     return await Promise.race([
-      fetch(input, { ...init, signal }),
-      timer,
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Request timeout'));
+        }, timeoutMs);
+      }),
     ]);
+  } catch (error) {
+    if (error instanceof Error && /timeout/i.test(error.message)) {
+      console.warn(`[Supabase] ${label} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
   } finally {
-    clear();
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+const fetchWithTimeout: typeof fetch = async (input, init) => {
+  const controller = new AbortController();
+  const cleanupCallbacks: Array<() => void> = [];
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  if (init?.signal) {
+    if (init.signal.aborted) {
+      controller.abort();
+    } else {
+      const abortFromCaller = () => controller.abort();
+      init.signal.addEventListener('abort', abortFromCaller, { once: true });
+      cleanupCallbacks.push(() => init.signal?.removeEventListener('abort', abortFromCaller));
+    }
+  }
+
+  try {
+    return await fetch(input, {
+      ...(init ?? {}),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError' && !init?.signal?.aborted) {
+      throw new Error('Request timeout');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    cleanupCallbacks.forEach((cleanup) => cleanup());
   }
 };
 
@@ -57,4 +100,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     fetch: fetchWithTimeout,
   }
 });
+
+export async function getSessionUser(timeoutMs = FETCH_TIMEOUT_MS): Promise<User | null> {
+  const { data: { session }, error } = await withSupabaseTimeout(
+    supabase.auth.getSession(),
+    'auth session lookup',
+    timeoutMs
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return session?.user ?? null;
+}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { getSessionUser, supabase } from '../lib/supabase';
 import { chatAPI, ChatChannel, ChatMessage } from '../lib/chat';
 import { chatPlatforms, getChatPlatform, ChatPlatformId } from './chat/chatConfig';
 
@@ -31,8 +31,8 @@ const LiveChatWidget: React.FC = () => {
   const platformMeta = useMemo(() => getChatPlatform(activePlatform), [activePlatform]);
 
   const loadUserSession = async () => {
-    const { data } = await supabase.auth.getUser();
-    setUserId(data.user?.id ?? null);
+    const user = await getSessionUser();
+    setUserId(user?.id ?? null);
   };
 
   const loadChannels = async () => {
