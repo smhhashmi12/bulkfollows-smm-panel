@@ -1,7 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react';
 import StatCard from '../../components/dashboard/StatCard';
 import { authAPI, ordersAPI, servicesAPI, adminAPI } from '../../lib/api';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 import { withTimeout } from '../../lib/withTimeout';
 import type { UserProfile, Order, Service } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
@@ -134,14 +133,6 @@ const DashboardPage: React.FC = () => {
         const loadData = async () => {
             try {
                 console.log('[Dashboard] Loading dashboard data...');
-                
-                // Check if user is authenticated using cached result
-                const user = await getCachedAuthUser();
-                if (!user) {
-                    console.log('[Dashboard] User not authenticated, redirecting to login');
-                    window.location.hash = '#/login';
-                    return;
-                }
                 
                 const [userProfile, userOrders, allServices, allAnnouncements] = await Promise.all([
                     withTimeout(authAPI.getUserProfile(), 8000, null, 'dashboard profile'),

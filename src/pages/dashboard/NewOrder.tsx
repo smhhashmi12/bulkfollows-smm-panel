@@ -1,6 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { servicesAPI, authAPI, paymentsAPI } from '../../lib/api';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 import useOrderManagement from '../../lib/useOrderManagement';
 import { withTimeout } from '../../lib/withTimeout';
 import type { Service, UserProfile } from '../../lib/api';
@@ -180,14 +179,6 @@ const NewOrderPage: React.FC = () => {
       setLoadingServices(true);
       try {
         console.log('[NewOrder] Loading services and profile...');
-        
-        // Check if user is authenticated using cached result
-        const user = await getCachedAuthUser();
-        if (!user) {
-          console.log('[NewOrder] User not authenticated, redirecting to login');
-          window.location.hash = '#/login';
-          return;
-        }
         
         const [servicesData, userProfile] = await Promise.all([
           withTimeout(servicesAPI.getMergedServices(), 8000, [], 'new order services'),

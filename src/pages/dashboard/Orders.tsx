@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { ordersAPI } from '../../lib/api';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 import { withTimeout } from '../../lib/withTimeout';
 import type { Order } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
@@ -23,14 +22,6 @@ const OrdersPage: React.FC = () => {
     const loadOrders = async () => {
       try {
         console.log('[Orders] Loading orders...');
-        
-        // Check if user is authenticated using cached result
-        const user = await getCachedAuthUser();
-        if (!user) {
-          console.log('[Orders] User not authenticated, redirecting to login');
-          window.location.hash = '#/login';
-          return;
-        }
         
         const userOrders = await withTimeout(ordersAPI.getOrders(), 8000, [], 'orders page list');
         console.log('[Orders] Orders loaded:', userOrders);

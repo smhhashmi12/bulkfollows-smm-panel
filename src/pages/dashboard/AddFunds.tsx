@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { paymentsAPI, authAPI } from '../../lib/api';
 import { isTimeoutError } from '../../lib/utils';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 import type { UserProfile } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
 
@@ -25,14 +24,6 @@ const AddFundsPage: React.FC = () => {
     const loadProfile = async () => {
       try {
         console.log('[AddFunds] Loading profile...');
-        
-        // Check if user is authenticated using cached result
-        const user = await getCachedAuthUser();
-        if (!user) {
-          console.log('[AddFunds] User not authenticated, redirecting to login');
-          window.location.hash = '#/login';
-          return;
-        }
         
         const userProfile = await authAPI.getUserProfile();
         setProfile(userProfile as UserProfile);

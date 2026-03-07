@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { earningsAPI, providerIntegrationAPI } from '../../lib/providerAndEarningsAPI';
 import { adminAPI } from '../../lib/api';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 
 interface Provider {
   id: string;
@@ -41,13 +40,6 @@ const ProviderPayoutsPage: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        console.log('[ProviderPayouts] Verifying admin access...');
-        const user = await getCachedAuthUser();
-        if (!user) {
-          window.location.hash = '#/admin/login';
-          return;
-        }
-
         console.log('[ProviderPayouts] Loading providers and payouts...');
         const [providersData, payoutsData] = await Promise.all([
           adminAPI.getAllProviders(),

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { earningsAPI } from '../../lib/providerAndEarningsAPI';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 
 interface EarningsSummary {
   totalRevenue: number;
@@ -48,12 +47,6 @@ const EarningsDashboard: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      const user = await getCachedAuthUser();
-      if (!user) {
-        window.location.hash = '#/admin/login';
-        return;
-      }
-
       const report = await earningsAPI.getFinancialReport(dateRange.startDate, dateRange.endDate);
       const rows = (report.summaries || []).map((s: any) => ({
         date: s.date,

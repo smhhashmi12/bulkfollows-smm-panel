@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import StatCard from '../../components/dashboard/StatCard';
 import { authAPI, ordersAPI, paymentsAPI, adminAPI } from '../../lib/api';
-import { getCachedAuthUser } from '../../lib/useAuthCheck';
 import type { UserProfile, Order, Payment } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
 import { Card, Badge } from '../../design-system';
@@ -29,14 +28,6 @@ const AdminDashboardPage: React.FC = () => {
         const loadData = async () => {
             try {
                 console.log('[AdminDashboard] Loading admin data...');
-                
-                // Check if user is authenticated using cached result
-                const user = await getCachedAuthUser();
-                if (!user) {
-                  console.log('[AdminDashboard] User not authenticated, redirecting to login');
-                  window.location.hash = '#/admin/login';
-                  return;
-                }
                 
                 const [allOrders, adminProfile, totalUsers, pendingTickets] = await Promise.all([
                     adminAPI.getAllOrders(),

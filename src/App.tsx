@@ -26,6 +26,11 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const sessionCheckDone = useRef(false);
+  const currentUserRef = useRef<User | null>(null);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   useEffect(() => {
     // Check for existing session on mount
@@ -134,13 +139,13 @@ const App: React.FC = () => {
         console.log('[Auth] Page became visible, checking session...');
         try {
           const { data: { session } } = await supabase.auth.getSession();
-          if (session && !currentUser) {
+          if (session && !currentUserRef.current) {
             console.log('[Auth] Session recovered on visibility change');
             const user = await authAPI.getCurrentUser();
             if (user) {
               setCurrentUser(user);
             }
-          } else if (!session && currentUser) {
+          } else if (!session && currentUserRef.current) {
             console.log('[Auth] Session expired while page was hidden');
             setCurrentUser(null);
           }
@@ -160,6 +165,10 @@ const App: React.FC = () => {
 
   // Refresh token proactively and on window focus to keep session alive
   useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
     // Refresh token immediately
     const refreshToken = async () => {
       try {
@@ -174,10 +183,7 @@ const App: React.FC = () => {
       }
     };
 
-    // Refresh immediately on mount if user is logged in
-    if (currentUser) {
-      refreshToken();
-    }
+    refreshToken();
 
     // Refresh every 3 minutes (more aggressive than 5 mins for better reliability)
     const tokenRefreshInterval = setInterval(refreshToken, 3 * 60 * 1000);
