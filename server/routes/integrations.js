@@ -2,7 +2,13 @@ import express from 'express';
 import { supabaseAdmin, supabaseAdminConfigured } from '../lib/supabaseServer.js';
 
 const router = express.Router();
-const SUPABASE_QUERY_TIMEOUT_MS = 5000;
+const SUPABASE_QUERY_TIMEOUT_MS = 12000;
+const PROVIDER_SERVICES_CACHE_TTL_MS = 60000;
+
+let providerServicesCache = {
+  expiresAt: 0,
+  value: null,
+};
 
 const getApiKeyFromRequest = (req) => {
   const directKey = req.headers['x-api-key'];
@@ -24,6 +30,12 @@ const getApiKeyFromRequest = (req) => {
 const extractProviderServiceId = (description) => {
   const text = String(description || '');
   const match = text.match(/Provider Service ID:\s*([^|]+)/i);
+  return match ? String(match[1]).trim() : '';
+};
+
+const extractProviderId = (description) => {
+  const text = String(description || '');
+  const match = text.match(/Provider ID:\s*([^|]+)/i);
   return match ? String(match[1]).trim() : '';
 };
 
@@ -118,12 +130,111 @@ router.get('/service-names', async (req, res) => {
   }
 });
 
+// GET /api/integrations/provider-service-link
+// Resolves a single service to its provider mapping during order submit.
+router.get('/provider-service-link', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'Service temporarily unavailable' });
+    }
+
+    const serviceId = String(req.query.service_id || '').trim();
+    if (!serviceId) {
+      return res.status(400).json({ error: 'Missing service_id' });
+    }
+
+    const { data: serviceRow, error: serviceError } = await runTimedQuery(
+      supabaseAdmin
+        .from('services')
+        .select('id, description')
+        .eq('id', serviceId)
+        .maybeSingle(),
+      'single service lookup query'
+    );
+
+    if (serviceError) {
+      console.error('[Server] Error fetching service for provider link:', serviceError);
+      return res.status(500).json({ error: 'Failed to resolve service mapping' });
+    }
+
+    const providerServiceIdFromDescription = extractProviderServiceId(serviceRow?.description);
+    const providerIdFromDescription = extractProviderId(serviceRow?.description);
+
+    const { data: directLink, error: directLinkError } = await runTimedQuery(
+      supabaseAdmin
+        .from('provider_services')
+        .select('provider_id, provider_service_id, service_id, status')
+        .eq('service_id', serviceId)
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle(),
+      'direct provider service link query'
+    );
+
+    if (directLinkError) {
+      console.error('[Server] Error fetching direct provider link:', directLinkError);
+      return res.status(500).json({ error: 'Failed to resolve provider link' });
+    }
+
+    if (directLink?.provider_id && directLink?.provider_service_id) {
+      return res.json({ ok: true, providerLink: directLink });
+    }
+
+    if (providerServiceIdFromDescription) {
+      const { data: descriptionLink, error: descriptionLinkError } = await runTimedQuery(
+        supabaseAdmin
+          .from('provider_services')
+          .select('provider_id, provider_service_id, service_id, status')
+          .eq('provider_service_id', providerServiceIdFromDescription)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle(),
+        'description provider service link query'
+      );
+
+      if (descriptionLinkError) {
+        console.error('[Server] Error fetching description-based provider link:', descriptionLinkError);
+        return res.status(500).json({ error: 'Failed to resolve provider link' });
+      }
+
+      if (descriptionLink?.provider_id && descriptionLink?.provider_service_id) {
+        return res.json({ ok: true, providerLink: descriptionLink });
+      }
+    }
+
+    if (providerIdFromDescription && providerServiceIdFromDescription) {
+      return res.json({
+        ok: true,
+        providerLink: {
+          provider_id: providerIdFromDescription,
+          provider_service_id: providerServiceIdFromDescription,
+          service_id: serviceId,
+          status: 'active',
+        },
+      });
+    }
+
+    return res.json({ ok: true, providerLink: null });
+  } catch (err) {
+    console.error('[Server] Provider service link error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/integrations/provider-services
 // Fetches provider services with actual service names (bypasses RLS)
 router.get('/provider-services', async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'Service temporarily unavailable' });
+    }
+
+    if (providerServicesCache.expiresAt > Date.now() && providerServicesCache.value) {
+      return res.json({
+        ok: true,
+        providerServices: providerServicesCache.value,
+        cached: true,
+      });
     }
 
     const { data: providerServices, error } = await runTimedQuery(
@@ -180,6 +291,11 @@ router.get('/provider-services', async (req, res) => {
         services: byId || byProviderServiceId || null,
       };
     });
+
+    providerServicesCache = {
+      expiresAt: Date.now() + PROVIDER_SERVICES_CACHE_TTL_MS,
+      value: mergedProviderServices,
+    };
 
     console.log('[Server] Provider services fetched:', mergedProviderServices.length, 'services');
     return res.json({ ok: true, providerServices: mergedProviderServices });

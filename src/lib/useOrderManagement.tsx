@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { ordersAPI, authAPI, paymentsAPI } from './api';
+import { ordersAPI, authAPI, paymentsAPI, servicesAPI } from './api';
 import type { Service, UserProfile } from './api';
 
 /**
@@ -63,15 +63,13 @@ export const useOrderManagement = () => {
     return parseFloat(basePrice.toFixed(2));
   };
 
-  const parseProviderMeta = (service: Service): { providerId: string; providerServiceId: string } | null => {
-    const description = String(service.description || '');
-    const providerIdMatch = description.match(/Provider ID:\s*([^|]+)/i);
-    const providerServiceIdMatch = description.match(/Provider Service ID:\s*([^|]+)/i);
-    const providerId = providerIdMatch ? String(providerIdMatch[1]).trim() : '';
-    const providerServiceId = providerServiceIdMatch ? String(providerServiceIdMatch[1]).trim() : '';
+  const normalizeOrderStatus = (statusValue: unknown): OrderResult['status'] => {
+    const rawStatus = String(statusValue || '').toLowerCase();
 
-    if (!providerId || !providerServiceId) return null;
-    return { providerId, providerServiceId };
+    if (rawStatus.includes('complete')) return 'completed';
+    if (rawStatus.includes('cancel') || rawStatus.includes('fail')) return 'failed';
+    if (rawStatus.includes('process')) return 'processing';
+    return 'pending';
   };
 
   /**
@@ -265,9 +263,15 @@ export const useOrderManagement = () => {
         });
 
         // Step 2: Detect provider mapping for selected service
-        const providerMeta = parseProviderMeta(service);
+        const providerMeta = await servicesAPI.resolveProviderLink(service);
+        if (!providerMeta) {
+          throw new Error(
+            'Selected service is not linked to any active provider yet. Please choose another service or ask admin to sync provider services.'
+          );
+        }
+
         let providerOrderId: string | undefined;
-        let persistedStatus: OrderResult['status'] = 'processing';
+        let persistedStatus: OrderResult['status'] = 'pending';
 
         // Step 3: Create order in local database
         const createdOrder = await executeWithRetry(
@@ -277,69 +281,71 @@ export const useOrderManagement = () => {
               orderData.link,
               orderData.quantity,
               orderData.deliveryTime,
-              providerMeta?.providerId
+              providerMeta.providerId,
+              undefined,
+              'pending',
+              charge
             );
           },
           { maxRetries: 2, delayMs: 1000, backoffMultiplier: 1.5 }
         );
 
         console.log('[OrderManagement] Order created successfully:', createdOrder);
+        persistedStatus = normalizeOrderStatus(createdOrder.status);
 
         // Step 4: Send order to provider (if mapped)
-        if (providerMeta) {
-          try {
-            const providerResp = await fetch('/api/provider/add-order', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                provider_id: providerMeta.providerId,
-                local_order_id: createdOrder.id,
-                service: providerMeta.providerServiceId,
-                link: orderData.link,
-                quantity: orderData.quantity,
-              }),
-            });
-            const providerData = await providerResp.json();
+        try {
+          const providerResp = await fetch('/api/provider/add-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider_id: providerMeta.providerId,
+              local_order_id: createdOrder.id,
+              service: providerMeta.providerServiceId,
+              link: orderData.link,
+              quantity: orderData.quantity,
+            }),
+          });
+          const providerData = await providerResp.json();
 
-            if (providerResp.ok && providerData?.order) {
-              providerOrderId = String(providerData.order);
-              if (providerData?.localOrder?.status) {
-                persistedStatus = String(providerData.localOrder.status).toLowerCase() as OrderResult['status'];
-              }
-              console.log('[OrderManagement] Provider order placed:', providerOrderId);
-            } else {
-              console.warn('[OrderManagement] Provider order placement failed:', providerData);
-              const providerError =
-                providerData?.details ||
-                providerData?.message ||
-                providerData?.error ||
-                'Provider rejected the order.';
-              const failedResult: OrderResult = {
-                id: createdOrder.id,
-                status: 'failed',
-                charge: charge,
-                orderId: createdOrder.id,
-                message: String(providerError),
-              };
-              setOrderStatus(failedResult);
-              setError(`Order #${createdOrder.id} was not accepted by the provider: ${providerError}`);
-              return failedResult;
-            }
-          } catch (providerErr) {
-            console.warn('[OrderManagement] Provider API call failed:', providerErr);
+          if (providerResp.ok && providerData?.order) {
+            providerOrderId = String(providerData.order);
+            persistedStatus = normalizeOrderStatus(
+              providerData?.localOrder?.status || 'processing'
+            );
+            console.log('[OrderManagement] Provider order placed:', providerOrderId);
+          } else {
+            console.warn('[OrderManagement] Provider order placement failed:', providerData);
             const providerError =
-              providerErr instanceof Error ? providerErr.message : 'Provider API request failed.';
+              providerData?.details ||
+              providerData?.message ||
+              providerData?.error ||
+              'Provider rejected the order.';
             const failedResult: OrderResult = {
               id: createdOrder.id,
               status: 'failed',
               charge: charge,
               orderId: createdOrder.id,
-              message: providerError,
+              message: String(providerError),
             };
             setOrderStatus(failedResult);
-            setError(`Order #${createdOrder.id} could not be confirmed by the provider: ${providerError}`);
+            setError(`Order #${createdOrder.id} was not accepted by the provider: ${providerError}`);
             return failedResult;
           }
+        } catch (providerErr) {
+          console.warn('[OrderManagement] Provider API call failed:', providerErr);
+          const providerError =
+            providerErr instanceof Error ? providerErr.message : 'Provider API request failed.';
+          const failedResult: OrderResult = {
+            id: createdOrder.id,
+            status: 'failed',
+            charge: charge,
+            orderId: createdOrder.id,
+            message: providerError,
+          };
+          setOrderStatus(failedResult);
+          setError(`Order #${createdOrder.id} could not be confirmed by the provider: ${providerError}`);
+          return failedResult;
         }
 
         // Step 5: Refresh profile/balance state
@@ -363,9 +369,7 @@ export const useOrderManagement = () => {
           charge: charge,
           orderId: createdOrder.id,
           providerOrderId,
-          message: providerOrderId
-            ? `Order created and sent to provider.`
-            : `Order created successfully. Processing...`,
+          message: 'Order created and sent to provider.',
         };
 
         setOrderStatus(result);
@@ -374,8 +378,8 @@ export const useOrderManagement = () => {
         // Step 8: Check status periodically (provider-first if available)
         checkOrderStatus(
           createdOrder.id,
-          providerOrderId ? 20 : 10,
-          providerMeta?.providerId,
+          20,
+          providerMeta.providerId,
           providerOrderId
         );
 

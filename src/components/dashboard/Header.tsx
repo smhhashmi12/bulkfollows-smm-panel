@@ -14,8 +14,14 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [currencyDropdownOpen, setCurrencyDropdownOpen] = useState(false);
     const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
-    const { currency, setCurrency, formatAmount } = useCurrency();
+    const { currency, setCurrency } = useCurrency();
     const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
+    const routeSegment = window.location.hash.split('/')[2] || 'dashboard';
+    const currentPageTitle = routeSegment
+        .split('-')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ') || 'Dashboard';
     return (
         <header className="ds-topbar px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-center gap-3 w-full md:w-auto">
@@ -29,15 +35,11 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                     </svg>
                 </button>
                 <div className="min-w-0">
-                    <h1 className="text-lg sm:text-xl font-bold capitalize truncate">{window.location.hash.split('/')[2] || 'Dashboard'}</h1>
+                    <h1 className="text-lg sm:text-xl font-bold truncate">{currentPageTitle}</h1>
                     <p className="text-xs sm:text-sm text-gray-400">Welcome back, {user.username}!</p>
                 </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-4 w-full md:w-auto md:ml-auto md:justify-end">
-                <div className="text-left sm:text-right">
-                    <p className="text-xs sm:text-sm text-gray-400">Account Balance</p>
-                    <p className="font-bold text-base sm:text-lg text-green-400">{formatAmount(50)}</p>
-                </div>
                 <div className="flex items-center gap-3 sm:gap-4">
                      <div className="relative">
                         <button 

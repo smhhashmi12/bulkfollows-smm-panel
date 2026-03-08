@@ -6,6 +6,7 @@ const FETCH_TIMEOUT_MS = 15_000;
 const LEGACY_AUTH_STORAGE_KEY = 'supabase.auth.token';
 const AUTH_COOKIE_SESSION_ENDPOINT = '/api/auth/session';
 const AUTH_COOKIE_CLEAR_ENDPOINT = '/api/auth/clear';
+const AUTH_COOKIE_SYNC_FAILURE_BACKOFF_MS = 60_000;
 const SHOULD_LOG_STORAGE = Boolean(import.meta.env.DEV);
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -79,7 +80,10 @@ const parseStoredSession = (rawValue: string | null): StoredSupabaseSession | nu
   return null;
 };
 
-let lastAuthCookieSyncSignature = '';
+let lastSuccessfulAuthCookieSyncSignature = '';
+let lastAttemptedAuthCookieSyncSignature = '';
+let authCookieSyncBackoffUntil = 0;
+let authCookieSyncWarningShown = false;
 
 const buildSessionSignature = (session: StoredSupabaseSession | null) => {
   if (!session?.access_token || !session?.refresh_token) {
@@ -102,11 +106,18 @@ const syncAuthCookieMirror = (rawValue: string | null) => {
   const session = parseStoredSession(rawValue);
   const signature = buildSessionSignature(session);
 
-  if (signature === lastAuthCookieSyncSignature) {
+  if (signature === lastSuccessfulAuthCookieSyncSignature) {
     return;
   }
 
-  lastAuthCookieSyncSignature = signature;
+  if (
+    authCookieSyncBackoffUntil > Date.now() &&
+    signature === lastAttemptedAuthCookieSyncSignature
+  ) {
+    return;
+  }
+
+  lastAttemptedAuthCookieSyncSignature = signature;
 
   const request =
     session?.access_token && session?.refresh_token
@@ -134,11 +145,27 @@ const syncAuthCookieMirror = (rawValue: string | null) => {
           keepalive: true,
         });
 
-  void request.catch((error) => {
-    if (SHOULD_LOG_STORAGE) {
-      console.warn('[Storage] Failed to sync auth cookies', error);
-    }
-  });
+  void request
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Cookie sync failed with ${response.status} ${response.statusText}`);
+      }
+
+      lastSuccessfulAuthCookieSyncSignature = signature;
+      authCookieSyncBackoffUntil = 0;
+      authCookieSyncWarningShown = false;
+    })
+    .catch((error) => {
+      authCookieSyncBackoffUntil = Date.now() + AUTH_COOKIE_SYNC_FAILURE_BACKOFF_MS;
+
+      if (SHOULD_LOG_STORAGE && !authCookieSyncWarningShown) {
+        authCookieSyncWarningShown = true;
+        console.warn(
+          '[Storage] Failed to sync auth cookies. Backend /api/auth routes are unreachable; browser-side Supabase session will continue without mirrored cookies until the server is available again.',
+          error
+        );
+      }
+    });
 };
 
 // Custom storage implementation for better persistence and cookie mirroring.

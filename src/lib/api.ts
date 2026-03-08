@@ -4,12 +4,72 @@ import type { User } from '../App';
 const PROVIDER_SERVICES_TIMEOUT_MS = 5000;
 const PROVIDER_SERVICES_CACHE_TTL_MS = 60000;
 const PROVIDER_SERVICES_FAILURE_BACKOFF_MS = 15000;
+const PROVIDER_SERVICE_LINK_TIMEOUT_MS = 8000;
 const AUTH_LOOKUP_TIMEOUT_MS = 8000;
 const SUPABASE_QUERY_TIMEOUT_MS = 12000;
 
 let providerServicesCache: any[] = [];
 let providerServicesCacheExpiresAt = 0;
 let providerServicesFailureBackoffUntil = 0;
+
+export interface ProviderServiceLink {
+  providerId: string;
+  providerServiceId: string;
+}
+
+function extractProviderLinkFromDescription(description: string | null | undefined): ProviderServiceLink | null {
+  const text = String(description || '');
+  const providerIdMatch = text.match(/Provider ID:\s*([^|]+)/i);
+  const providerServiceIdMatch = text.match(/Provider Service ID:\s*([^|]+)/i);
+  const providerId = providerIdMatch ? String(providerIdMatch[1]).trim() : '';
+  const providerServiceId = providerServiceIdMatch ? String(providerServiceIdMatch[1]).trim() : '';
+
+  if (!providerId || !providerServiceId) return null;
+  return { providerId, providerServiceId };
+}
+
+async function fetchProviderServiceLink(serviceId: string): Promise<ProviderServiceLink | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_SERVICE_LINK_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(
+      `/api/integrations/provider-service-link?service_id=${encodeURIComponent(serviceId)}`,
+      { signal: controller.signal }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to resolve provider link: ${response.status} ${response.statusText}`
+      );
+    }
+
+    const payload = await response.json();
+    const providerLink = payload?.providerLink;
+    const providerId = String(
+      providerLink?.provider_id || providerLink?.providerId || ''
+    ).trim();
+    const providerServiceId = String(
+      providerLink?.provider_service_id || providerLink?.providerServiceId || ''
+    ).trim();
+
+    if (!providerId || !providerServiceId) {
+      return null;
+    }
+
+    return { providerId, providerServiceId };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      console.warn('[servicesAPI] provider-service-link request timed out during order submit');
+    } else {
+      console.error('[servicesAPI] provider-service-link request failed:', error);
+    }
+
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 async function getAuthenticatedUser() {
   const user = await getSessionUser(AUTH_LOOKUP_TIMEOUT_MS);
@@ -372,6 +432,26 @@ export const servicesAPI = {
       return this.getServices(category);
     }
   },
+
+  async resolveProviderLink(service: Pick<Service, 'id' | 'description'>): Promise<ProviderServiceLink | null> {
+    const fromDescription = extractProviderLinkFromDescription(service.description);
+    if (fromDescription) {
+      return fromDescription;
+    }
+
+    const cachedProviderService = (await getProviderServicesSnapshot()).find((item: any) => {
+      return String(item?.service_id || '').trim() === String(service.id).trim();
+    });
+
+    if (cachedProviderService?.provider_id && cachedProviderService?.provider_service_id) {
+      return {
+        providerId: String(cachedProviderService.provider_id).trim(),
+        providerServiceId: String(cachedProviderService.provider_service_id).trim(),
+      };
+    }
+
+    return fetchProviderServiceLink(service.id);
+  },
 };
 
 // Orders Functions
@@ -381,16 +461,18 @@ export const ordersAPI = {
     link: string,
     quantity: number,
     deliveryTime: number = 24,
-    providerId?: string
+    providerId?: string,
+    providerOrderId?: string,
+    initialStatus: Order['status'] = 'pending',
+    chargeOverride?: number
   ) {
     const user = await getAuthenticatedUser();
+    let charge = Number.isFinite(chargeOverride) ? Number(chargeOverride) : NaN;
 
-    // Get service details with real data from database
-    const service = await servicesAPI.getService(serviceId);
-    
-    // Calculate charge with time-based multiplier
-    const basePrice = (service.rate_per_1000 / 1000) * quantity;
-    const charge = basePrice;
+    if (!Number.isFinite(charge)) {
+      const service = await servicesAPI.getService(serviceId);
+      charge = (service.rate_per_1000 / 1000) * quantity;
+    }
 
     // Check user balance
     const profile = await authAPI.getUserProfile();
@@ -406,11 +488,12 @@ export const ordersAPI = {
           user_id: user.id,
           service_id: serviceId,
           provider_id: providerId || null,
+          provider_order_id: providerOrderId || null,
           link,
           quantity,
           charge,
           delivery_time: deliveryTime,
-          status: 'processing',
+          status: initialStatus,
         })
         .select()
         .single(),

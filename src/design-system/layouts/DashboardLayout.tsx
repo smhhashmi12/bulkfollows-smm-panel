@@ -13,7 +13,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, navba
         {sidebar}
         <div className="flex-1 min-w-0 flex flex-col ds-page">
           {navbar}
-          <main className="mt-4 flex-1 min-w-0 overflow-y-auto ds-scrollbar">{children}</main>
+          <main className="mt-4 flex-1 min-w-0 overflow-x-hidden overflow-y-auto ds-scrollbar">{children}</main>
         </div>
       </div>
     </div>

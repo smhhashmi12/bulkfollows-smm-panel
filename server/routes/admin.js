@@ -8,6 +8,8 @@ import {
 import { AUTH_COOKIE_NAMES } from '../lib/authCookies.js';
 
 const router = express.Router();
+const MAX_DECIMAL_10_2 = 99999999.99;
+const MAX_INT32 = 2147483647;
 
 const pickFirst = (...values) => {
   for (const value of values) {
@@ -26,6 +28,23 @@ const toNumber = (value, fallback = 0) => {
 const toInteger = (value, fallback = 0) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const clampDecimal10_2 = (value, fallback = 0) => {
+  const parsed = toNumber(value, fallback);
+  const bounded = Math.min(Math.max(parsed, 0), MAX_DECIMAL_10_2);
+  return Number(bounded.toFixed(2));
+};
+
+const clampQuantity = (value, fallback = 1) => {
+  const parsed = toInteger(value, fallback);
+  return Math.min(Math.max(parsed, 1), MAX_INT32);
+};
+
+const limitText = (value, maxLength = 240) => {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 1).trimEnd() + '…';
 };
 
 const getEmbeddedObject = (value) => {
@@ -376,29 +395,51 @@ router.post('/sync-provider-services', async (req, res) => {
       });
     }
 
+    let clampedRateCount = 0;
+    let clampedQuantityCount = 0;
+
     const normalizedServices = services.map((svc, index) => {
       const providerServiceId = pickFirst(svc.service, svc.id, `unknown_${index}`);
-      const serviceName = pickFirst(
+      const rawServiceName = pickFirst(
         svc.name,
         svc.service_name,
         svc.title,
         `Service #${providerServiceId}`
       );
-      const category = pickFirst(svc.category, svc.group, svc.service_type, 'Other');
-      const providerRate = toNumber(pickFirst(svc.rate, svc.price), 0);
-      const minQuantity = toInteger(pickFirst(svc.min, svc.min_quantity), 1);
-      const maxQuantity = toInteger(pickFirst(svc.max, svc.max_quantity), 10000);
+      const rawCategory = pickFirst(svc.category, svc.group, svc.service_type, 'Other');
+      const rawProviderRate = toNumber(pickFirst(svc.rate, svc.price), 0);
+      const rawMinQuantity = toInteger(pickFirst(svc.min, svc.min_quantity), 1);
+      const rawMaxQuantity = toInteger(pickFirst(svc.max, svc.max_quantity), 10000);
+      const providerRate = clampDecimal10_2(rawProviderRate, 0);
+      const ourRate = clampDecimal10_2(providerRate * (1 + markupPercent / 100), providerRate);
+      const minQuantity = clampQuantity(rawMinQuantity, 1);
+      const maxQuantity = clampQuantity(rawMaxQuantity, Math.max(minQuantity, 10000));
+
+      if (providerRate !== rawProviderRate || ourRate !== rawProviderRate * (1 + markupPercent / 100)) {
+        clampedRateCount += 1;
+      }
+
+      if (minQuantity !== rawMinQuantity || maxQuantity !== rawMaxQuantity) {
+        clampedQuantityCount += 1;
+      }
 
       return {
         providerServiceId,
-        serviceName,
-        category,
+        serviceName: limitText(rawServiceName, 180),
+        category: limitText(rawCategory, 80),
         providerRate,
-        ourRate: providerRate * (1 + markupPercent / 100),
+        ourRate,
         minQuantity,
-        maxQuantity,
+        maxQuantity: Math.max(maxQuantity, minQuantity),
       };
     });
+
+    if (clampedRateCount || clampedQuantityCount) {
+      console.warn('[sync-services] Clamped provider values to fit database schema:', {
+        clampedRateCount,
+        clampedQuantityCount,
+      });
+    }
 
     // Upsert platform services first so provider_services can reference service_id
     const serviceUpserts = normalizedServices.map((item) => ({

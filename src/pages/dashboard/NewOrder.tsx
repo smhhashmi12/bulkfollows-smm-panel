@@ -4,6 +4,7 @@ import useOrderManagement from '../../lib/useOrderManagement';
 import { withTimeout } from '../../lib/withTimeout';
 import type { Service, UserProfile } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
+import { consumePendingOrderServiceId } from '../../lib/pendingOrderService';
 
 const NewOrderPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -186,6 +187,17 @@ const NewOrderPage: React.FC = () => {
         ]);
         setAllServices(servicesData);
         setProfile(userProfile);
+
+        const pendingServiceId = consumePendingOrderServiceId();
+        if (pendingServiceId) {
+          const pendingService = servicesData.find((service) => service.id === pendingServiceId) || null;
+          if (pendingService) {
+            setSelectedCategory(pendingService.category);
+            setSelectedPlatform(getCategoryPlatform(pendingService.category) || '');
+            setSelectedService(pendingService);
+            setServiceSearch(pendingService.name);
+          }
+        }
       } catch (err: any) {
         console.error('[NewOrder] Failed to load services:', err);
       } finally {
@@ -481,189 +493,69 @@ const NewOrderPage: React.FC = () => {
         </div>
       )}
 
-      {/* Global Search + Filters */}
-      <div className="bg-brand-container border border-brand-border rounded-2xl p-4 mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div ref={searchBoxRef} className="md:col-span-2 relative">
-            <label htmlFor="serviceSearchTop" className="block text-sm font-semibold text-gray-300 mb-2">
-              Search Service
-            </label>
-            <input
-              id="serviceSearchTop"
-              type="text"
-              value={serviceSearch}
-              onChange={(e) => {
-                setServiceSearch(e.target.value);
-                setSelectedService(null);
-                setShowSearchSuggestions(true);
-              }}
-              onFocus={() => setShowSearchSuggestions(true)}
-              placeholder="Search by service or category..."
-              className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-brand-purple focus:outline-none"
-            />
-            {showSearchSuggestions && searchSuggestions.length > 0 && (
-              <div className="absolute z-30 left-0 right-0 mt-1 bg-[#120a25] border border-brand-border rounded-lg shadow-xl overflow-hidden">
-                {searchSuggestions.map((service) => (
-                  <button
-                    key={service.id}
-                    type="button"
-                    onClick={() => {
-                      const platform = getCategoryPlatform(service.category) || '';
-                      setServiceSearch(service.name);
-                      setSelectedPlatform(platform);
-                      setSelectedCategory(service.category);
-                      setSelectedService(service);
-                      setShowSearchSuggestions(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-white/5 transition-colors border-b border-brand-border last:border-b-0"
-                  >
-                    <p className="text-sm text-white font-medium truncate">{service.name}</p>
-                    <p className="text-xs text-gray-400 truncate">{service.category}</p>
-                  </button>
-                ))}
-              </div>
-            )}
+      <div className="bg-brand-container border border-brand-border rounded-2xl p-5 mb-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="max-w-2xl">
+            <p className="text-xs uppercase tracking-[0.24em] text-brand-accent font-semibold">Order Section</p>
+            <h2 className="mt-2 text-2xl font-bold text-white">Place the order here. Browse full services from the separate sidebar page.</h2>
+            <p className="mt-2 text-sm text-gray-400">
+              This page now stays focused on service selection, order placement, and order details only.
+            </p>
           </div>
-          <div>
-            <label htmlFor="categoryTypeFilter" className="block text-sm font-semibold text-gray-300 mb-2">
-              Filter
-            </label>
-            <select
-              id="categoryTypeFilter"
-              value={categoryTypeFilter}
-              onChange={(e) => {
-                setCategoryTypeFilter(e.target.value as 'all' | 'social' | 'private');
-                setSelectedService(null);
-              }}
-              className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white focus:ring-2 focus:ring-brand-purple focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Categories</option>
-              <option value="social">Social Categories</option>
-              <option value="private">Private Categories</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Platform Slider */}
-      <div className="bg-brand-container border border-brand-border rounded-2xl p-4 md:p-5 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-gray-200 tracking-wide">Browse Social Platforms</h2>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => scrollCategorySlider('left')}
-              className="h-8 w-8 rounded-full border border-brand-border bg-black/30 text-gray-300 hover:text-white hover:bg-black/50 transition-colors"
-              aria-label="Scroll categories left"
-            >
-              <svg viewBox="0 0 24 24" className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollCategorySlider('right')}
-              className="h-8 w-8 rounded-full border border-brand-border bg-black/30 text-gray-300 hover:text-white hover:bg-black/50 transition-colors"
-              aria-label="Scroll categories right"
-            >
-              <svg viewBox="0 0 24 24" className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div
-          ref={categorySliderRef}
-          className="flex items-center gap-2 overflow-x-auto ds-scrollbar pb-2 scroll-smooth"
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedPlatform('');
-              setSelectedCategory('');
-              setSelectedService(null);
-            }}
-            className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${
-              selectedPlatform === '' && selectedCategory === ''
-                ? 'ds-btn-primary text-white'
-                : 'ds-pill text-gray-300 hover:text-white'
-            }`}
-            title="All Services"
+          <a
+            href="#/dashboard/services"
+            className="inline-flex items-center justify-center rounded-xl border border-brand-border bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
           >
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/10">
-              {renderCategoryIcon('all', 'w-3.5 h-3.5')}
-            </span>
-            <span>All</span>
-          </button>
-
-          {socialPlatforms.map((platform) => {
-            const platInfo = getPlatformInfo(platform.label);
-            return (
-              <button
-                key={platform.key}
-                type="button"
-                onClick={() => {
-                  setSelectedPlatform(platform.key);
-                  const firstCategory = categories.find((category) => getCategoryPlatform(category) === platform.key) || '';
-                  setSelectedCategory(firstCategory);
-                  setSelectedService(null);
-                  setServiceSearch('');
-                }}
-                className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs sm:text-sm font-semibold transition ${
-                  selectedPlatform === platform.key
-                    ? 'ds-btn-primary text-white'
-                    : 'ds-pill text-gray-300 hover:text-white'
-                }`}
-                title={platInfo.label}
-              >
-                <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full border bg-gradient-to-br ${platInfo.accent}`}>
-                  {platInfo.icon}
-                </span>
-                <span>{platform.label}</span>
-              </button>
-            );
-          })}
+            Open Services Explorer
+          </a>
         </div>
       </div>
-{/* Order Form Section - Clean Casper Style */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6">
+        <div>
           <div className="bg-brand-container border border-brand-border rounded-2xl p-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Category Dropdown */}
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
               <div>
-                <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-2">
-                  Category
-                </label>
-                <select
-                  id="category"
-                  value={selectedCategory}
-                  onChange={(e) => {
-                    const nextCategory = e.target.value;
-                    setSelectedCategory(nextCategory);
-                    setSelectedPlatform(nextCategory ? (getCategoryPlatform(nextCategory) || '') : '');
-                    setSelectedService(null);
-                    setServiceSearch('');
-                  }}
-                  className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white focus:ring-2 focus:ring-brand-purple focus:outline-none cursor-pointer"
-                >
-                  <option value="">Select a category...</option>
-                  {visibleCategories.map(cat => (
-                    <option key={cat} value={cat}>
-                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                    </option>
-                  ))}
-                </select>
+                <p className="text-xs uppercase tracking-[0.22em] text-brand-accent font-semibold">Order Placement</p>
+                <h2 className="mt-2 text-xl font-bold text-white">Select service and place order</h2>
+                <p className="mt-2 text-sm text-gray-400">Only the fields needed to create the order are kept here.</p>
               </div>
+              <div className="rounded-xl border border-brand-border bg-black/20 px-4 py-3 text-sm text-gray-300">
+                <p className="text-xs uppercase tracking-[0.18em] text-gray-500">Service Status</p>
+                <p className="mt-1 font-semibold text-white">{selectedService ? 'Selected' : 'Not selected'}</p>
+              </div>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-2">
+                    Category
+                  </label>
+                  <select
+                    id="category"
+                    value={selectedCategory}
+                    onChange={(e) => {
+                      const nextCategory = e.target.value;
+                      setSelectedCategory(nextCategory);
+                      setSelectedPlatform(nextCategory ? (getCategoryPlatform(nextCategory) || '') : '');
+                      setSelectedService(null);
+                      setServiceSearch('');
+                    }}
+                    className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white focus:ring-2 focus:ring-brand-purple focus:outline-none cursor-pointer"
+                  >
+                    <option value="">Select a category...</option>
+                    {visibleCategories.map(cat => (
+                      <option key={cat} value={cat}>
+                        {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Service Dropdown */}
-              <div>
-                <label htmlFor="service" className="block text-sm font-semibold text-gray-300 mb-2">
-                  Service
-                </label>
-                {selectedCategory || serviceSearch || selectedPlatform ? (
-                  <>
+                <div>
+                  <label htmlFor="service" className="block text-sm font-semibold text-gray-300 mb-2">
+                    Service
+                  </label>
+                  {selectedCategory || serviceSearch || selectedPlatform ? (
                     <select
                       id="service"
                       value={selectedService?.id || ''}
@@ -686,51 +578,51 @@ const NewOrderPage: React.FC = () => {
                         </option>
                       ))}
                     </select>
-                  </>
-                ) : (
-                  <div className="w-full bg-black/20 border border-brand-border rounded-lg p-3 text-gray-400 text-sm">
-                    Select platform/category or search service first
-                  </div>
-                )}
+                  ) : (
+                    <div className="w-full bg-black/20 border border-brand-border rounded-lg p-3 text-gray-400 text-sm">
+                      Select category first or open the Services page.
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Link Input */}
-              <div>
-                <label htmlFor="link" className="block text-sm font-semibold text-gray-300 mb-2">
-                  Link
-                </label>
-                <input
-                  type="url"
-                  id="link"
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                  placeholder="https://www.instagram.com/username"
-                  required
-                  className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-brand-purple focus:outline-none"
-                />
-              </div>
+              <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px] gap-4">
+                <div>
+                  <label htmlFor="link" className="block text-sm font-semibold text-gray-300 mb-2">
+                    Link
+                  </label>
+                  <input
+                    type="url"
+                    id="link"
+                    value={link}
+                    onChange={(e) => setLink(e.target.value)}
+                    placeholder="https://www.instagram.com/username"
+                    required
+                    className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-brand-purple focus:outline-none"
+                  />
+                </div>
 
-              {/* Quantity Input */}
-              <div>
-                <label htmlFor="quantity" className="block text-sm font-semibold text-gray-300 mb-2">
-                  Quantity
-                </label>
-                <input
-                  type="number"
-                  id="quantity"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="500"
-                  required
-                  min={selectedService?.min_quantity || 0}
-                  max={selectedService?.max_quantity || 100000}
-                  className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-brand-purple focus:outline-none"
-                />
-                {selectedService && (
-                  <p className="text-xs text-gray-400 mt-2">
-                    Min: {selectedService.min_quantity.toLocaleString()} - Max: {selectedService.max_quantity.toLocaleString()}
-                  </p>
-                )}
+                <div>
+                  <label htmlFor="quantity" className="block text-sm font-semibold text-gray-300 mb-2">
+                    Quantity
+                  </label>
+                  <input
+                    type="number"
+                    id="quantity"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    placeholder="500"
+                    required
+                    min={selectedService?.min_quantity || 0}
+                    max={selectedService?.max_quantity || 100000}
+                    className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-brand-purple focus:outline-none"
+                  />
+                  {selectedService && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      Min: {selectedService.min_quantity.toLocaleString()} - Max: {selectedService.max_quantity.toLocaleString()}
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Charge Calculation */}
@@ -787,9 +679,9 @@ const NewOrderPage: React.FC = () => {
         </div>
 
         {/* Service Details Sidebar */}
-        <div className="lg:col-span-1">
+        <div>
           <div className="bg-brand-container border border-brand-border rounded-2xl p-6 sticky top-6">
-            <h2 className="text-lg font-bold mb-4 text-white">Service Details</h2>
+            <h2 className="text-lg font-bold mb-4 text-white">Order Details</h2>
             {selectedService ? (
               <div className="space-y-4 text-sm text-gray-300">
                 <div>
@@ -818,6 +710,19 @@ const NewOrderPage: React.FC = () => {
                   <p className="font-semibold text-white">
                     {selectedService.min_quantity.toLocaleString()} - {selectedService.max_quantity.toLocaleString()}
                   </p>
+                </div>
+                <hr className="border-brand-border" />
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Link</p>
+                  <p className="font-semibold text-white break-all">{link || 'Add the destination link in the order form.'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Quantity</p>
+                  <p className="font-semibold text-white">{quantity ? Number(quantity).toLocaleString() : 'Add quantity in the order form.'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Charge</p>
+                  <p className="font-semibold text-brand-accent">{quantity ? formatAmount(calculateChargeForDisplay()) : 'Charge updates after quantity input'}</p>
                 </div>
                 {selectedService.description && (
                   <>

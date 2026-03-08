@@ -20,6 +20,39 @@ interface ProviderFormData {
   api_secret: string;
 }
 
+const getBackendUnavailableMessage = () =>
+  'Backend server is not reachable. Start or restart the local API server on port 4000, then try again.';
+
+const toActionableFetchError = (error: unknown) => {
+  if (error instanceof TypeError && /fetch/i.test(error.message)) {
+    return new Error(getBackendUnavailableMessage());
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+};
+
+const fetchApiJson = async (input: RequestInfo | URL, init?: RequestInit) => {
+  let response: Response;
+
+  try {
+    response = await fetch(input, init);
+  } catch (error) {
+    throw toActionableFetchError(error);
+  }
+
+  const raw = await response.text();
+  let payload: any = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = { message: raw };
+    }
+  }
+
+  return { response, payload };
+};
+
 const ProviderManagementPage: React.FC = () => {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,14 +158,13 @@ const ProviderManagementPage: React.FC = () => {
       };
 
       // This would call a backend endpoint to test the provider connection
-      const response = await fetch('/api/admin/test-provider', {
+      const { response, payload: result } = await fetchApiJson('/api/admin/test-provider', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(testPayload),
       });
 
       if (response.ok) {
-        const result = await response.json();
         setTestResult({
           success: true,
           message: `Connection successful. Balance: $${result.balance?.toFixed(2) || '0.00'}`,
@@ -160,12 +192,11 @@ const ProviderManagementPage: React.FC = () => {
       setError(null);
 
       // Call backend to sync services from provider
-      const response = await fetch('/api/admin/sync-provider-services', {
+      const { response, payload: result } = await fetchApiJson('/api/admin/sync-provider-services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider_id: provider.id }),
       });
-      const result = await response.json();
 
       if (!response.ok || !result.success) {
         throw new Error(result?.message || 'Sync failed');
@@ -188,7 +219,7 @@ const ProviderManagementPage: React.FC = () => {
       const { adminAPI } = await import('../../lib/api');
 
       // Call test connection to refresh balance
-      const response = await fetch('/api/admin/test-provider', {
+      const { response, payload: result } = await fetchApiJson('/api/admin/test-provider', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -199,7 +230,6 @@ const ProviderManagementPage: React.FC = () => {
       });
 
       if (response.ok) {
-        const result = await response.json();
         // Update provider balance
         await adminAPI.updateProvider(provider.id, { balance: result.balance || 0 });
         await fetchProviders();

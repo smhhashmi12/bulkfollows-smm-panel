@@ -55,6 +55,21 @@ const parseApiResponse = async (response: Response) => {
   }
 };
 
+const getBackendUnavailableMessage = () =>
+  'Backend server is not reachable. Start or restart the local API server on port 4000, then try again.';
+
+const fetchApiResponse = async (input: RequestInfo | URL, init?: RequestInit) => {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof TypeError && /fetch/i.test(error.message)) {
+      throw new Error(getBackendUnavailableMessage());
+    }
+
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+};
+
 const ProviderServiceManagementPage: React.FC = () => {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [rows, setRows] = useState<ProviderServiceRow[]>([]);
@@ -86,7 +101,7 @@ const ProviderServiceManagementPage: React.FC = () => {
     if (providerFilter !== 'all') params.set('provider_id', providerFilter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
 
-    const response = await fetch(`/api/admin/provider-services?${params.toString()}`);
+    const response = await fetchApiResponse(`/api/admin/provider-services?${params.toString()}`);
     const result = await parseApiResponse(response);
     if (!response.ok || !result.success) {
       throw new Error(result?.message || 'Failed to load provider services');
@@ -158,7 +173,7 @@ const ProviderServiceManagementPage: React.FC = () => {
     setError('');
     setMessage('');
     try {
-      const response = await fetch('/api/admin/sync-provider-services', {
+      const response = await fetchApiResponse('/api/admin/sync-provider-services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider_id: providerId, markup_percent: markupPercent }),
@@ -191,7 +206,7 @@ const ProviderServiceManagementPage: React.FC = () => {
 
     for (const provider of providers) {
       try {
-        const response = await fetch('/api/admin/sync-provider-services', {
+        const response = await fetchApiResponse('/api/admin/sync-provider-services', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ provider_id: provider.id, markup_percent: markupPercent }),
@@ -239,7 +254,7 @@ const ProviderServiceManagementPage: React.FC = () => {
     setMessage('');
 
     try {
-      const response = await fetch(`/api/admin/provider-services/${editing.id}`, {
+      const response = await fetchApiResponse(`/api/admin/provider-services/${editing.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),

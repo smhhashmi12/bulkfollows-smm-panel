@@ -137,7 +137,7 @@ const DashboardPage: React.FC = () => {
                 const [userProfile, userOrders, allServices, allAnnouncements] = await Promise.all([
                     withTimeout(authAPI.getUserProfile(), 8000, null, 'dashboard profile'),
                     withTimeout(ordersAPI.getOrders(), 8000, [], 'dashboard orders'),
-                    withTimeout(servicesAPI.getMergedServices(), 8000, [], 'dashboard services'),
+                    withTimeout(servicesAPI.getServices(), 8000, [], 'dashboard services'),
                     withTimeout(
                         adminAPI.getPublishedAnnouncements().catch(() => []),
                         8000,

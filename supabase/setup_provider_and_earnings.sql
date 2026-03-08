@@ -19,10 +19,10 @@ CREATE TABLE IF NOT EXISTS public.provider_services (
   provider_id UUID NOT NULL REFERENCES public.providers(id) ON DELETE CASCADE,
   service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
   provider_service_id TEXT NOT NULL, -- External provider's service ID
-  provider_rate DECIMAL(10, 2) NOT NULL, -- Cost per 1000 from provider
-  our_rate DECIMAL(10, 2) NOT NULL, -- Price we charge customers
-  min_quantity INTEGER,
-  max_quantity INTEGER,
+  provider_rate DECIMAL(18, 6) NOT NULL, -- Cost per 1000 from provider
+  our_rate DECIMAL(18, 6) NOT NULL, -- Price we charge customers
+  min_quantity BIGINT,
+  max_quantity BIGINT,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

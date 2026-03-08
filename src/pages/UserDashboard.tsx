@@ -5,6 +5,7 @@ import { DashboardLayout } from '../design-system';
 import type { User } from '../App';
 
 const DashboardPage = lazy(() => import('./dashboard/Dashboard'));
+const ServicesPage = lazy(() => import('./dashboard/Services'));
 const NewOrderPage = lazy(() => import('./dashboard/NewOrder'));
 const AddFundsPage = lazy(() => import('./dashboard/AddFunds'));
 const OrdersPage = lazy(() => import('./dashboard/Orders'));
@@ -39,6 +40,7 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
 
     const renderPage = () => {
         switch(page) {
+            case 'services': return <ServicesPage />;
             case 'new-order': return <NewOrderPage />;
             case 'add-funds': return <AddFundsPage />;
             case 'orders': return <OrdersPage />;
