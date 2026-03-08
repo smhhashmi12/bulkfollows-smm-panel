@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { User } from '../App'; // Import the User type
+import type { User } from '../App';
+import { getAvatarDataUri } from '../lib/avatar';
 
 const Logo: React.FC = () => (
   <div className="flex items-center space-x-2">
@@ -71,7 +72,7 @@ const Header: React.FC<HeaderProps> = ({ currentUser, onLogout }) => {
         {currentUser ? (
              <div className="relative">
                 <button onClick={() => setDropdownOpen(!dropdownOpen)} className="flex items-center gap-2 cursor-pointer">
-                    <img src={`https://i.pravatar.cc/150?u=${currentUser.username}`} alt="User Avatar" className="w-10 h-10 rounded-full border-2 border-brand-purple" />
+                    <img src={getAvatarDataUri(currentUser.username)} alt="User Avatar" className="w-10 h-10 rounded-full border-2 border-brand-purple" />
                 </button>
                 {dropdownOpen && (
                      <div className="absolute right-0 mt-2 w-48 bg-brand-container border border-brand-border rounded-lg shadow-lg py-1 z-20">

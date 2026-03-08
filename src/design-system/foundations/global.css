@@ -33,7 +33,7 @@
 body {
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
-  font-family: 'Space Grotesk', 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   margin: 0;

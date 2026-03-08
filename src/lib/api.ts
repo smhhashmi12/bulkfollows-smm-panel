@@ -139,6 +139,27 @@ export interface Provider {
 
 // Auth Functions
 export const authAPI = {
+  async signInWithGoogle(redirectHash = '#/dashboard') {
+    const redirectUrl = new URL(window.location.pathname || '/', window.location.origin);
+    redirectUrl.hash = redirectHash.startsWith('#') ? redirectHash : `#${redirectHash}`;
+
+    const { data, error } = await runSupabaseQuery(
+      supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl.toString(),
+          queryParams: {
+            prompt: 'select_account',
+          },
+        },
+      }),
+      'auth google sign in'
+    );
+
+    if (error) throw error;
+    return data;
+  },
+
   async signUp(email: string, password: string, username: string) {
     const { data, error } = await runSupabaseQuery(
       supabase.auth.signUp({

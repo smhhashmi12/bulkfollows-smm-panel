@@ -12,15 +12,14 @@ import WhyChooseUs from '../components/WhyChooseUs';
 import Faq from '../components/Faq';
 import Cta from '../components/Cta';
 import Footer from '../components/Footer';
-import { User } from '../App';
+import type { User } from '../App';
 
 interface LandingPageProps {
   currentUser: User | null;
   onLogout: () => void;
-  onLoginSuccess: (user: User) => void;
 }
 
-const LandingPage: React.FC<LandingPageProps> = ({ currentUser, onLogout, onLoginSuccess }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ currentUser, onLogout }) => {
   return (
     <div className="bg-brand-dark ds-noise text-white font-sans overflow-x-hidden">
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-[#1a0a36] to-brand-dark z-0"></div>
@@ -29,7 +28,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ currentUser, onLogout, onLogi
       <div className="relative z-10">
         <Header currentUser={currentUser} onLogout={onLogout} />
         <main>
-          <Hero onLoginSuccess={onLoginSuccess} />
+          <Hero />
           <About />
           <Benefits />
           <Services />

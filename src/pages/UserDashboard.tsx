@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import Sidebar from '../components/dashboard/Sidebar';
 import DashboardHeader from '../components/dashboard/Header';
 import { DashboardLayout } from '../design-system';
-import DashboardPage from './dashboard/Dashboard';
-import NewOrderPage from './dashboard/NewOrder';
-import AddFundsPage from './dashboard/AddFunds';
-import OrdersPage from './dashboard/Orders';
-import ApiPage from './dashboard/Api';
-import SupportPage from './dashboard/Support';
-import { User } from '../App';
+import type { User } from '../App';
+
+const DashboardPage = lazy(() => import('./dashboard/Dashboard'));
+const NewOrderPage = lazy(() => import('./dashboard/NewOrder'));
+const AddFundsPage = lazy(() => import('./dashboard/AddFunds'));
+const OrdersPage = lazy(() => import('./dashboard/Orders'));
+const ApiPage = lazy(() => import('./dashboard/Api'));
+const SupportPage = lazy(() => import('./dashboard/Support'));
 
 interface UserDashboardProps {
     user: User;
@@ -18,6 +19,12 @@ interface UserDashboardProps {
 const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
     const [page, setPage] = useState('dashboard');
     const [sidebarOpen, setSidebarOpen] = useState(false);
+
+    const pageFallback = (
+        <div className="bg-brand-container border border-brand-border rounded-2xl p-8 text-center text-gray-300">
+            Loading page...
+        </div>
+    );
     
     useEffect(() => {
         const handleHashChange = () => {
@@ -48,7 +55,9 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
             sidebar={<Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
             navbar={<DashboardHeader user={user} onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />}
         >
-            {renderPage()}
+            <Suspense fallback={pageFallback}>
+                {renderPage()}
+            </Suspense>
         </DashboardLayout>
     );
 };

@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { authAPI } from '../lib/api';
 
+const GoogleIcon: React.FC = () => (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.2-.9 2.3-1.9 3l3 2.3c1.8-1.7 2.9-4.1 2.9-7 0-.7-.1-1.4-.2-2H12z" />
+        <path fill="#34A853" d="M12 21c2.6 0 4.8-.9 6.4-2.5l-3-2.3c-.8.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.1l-3.1 2.4C5 18.8 8.2 21 12 21z" />
+        <path fill="#4A90E2" d="M6.4 13c-.2-.6-.4-1.3-.4-2s.1-1.4.4-2L3.3 6.6C2.5 8 2 9.4 2 11s.5 3 1.3 4.4L6.4 13z" />
+        <path fill="#FBBC05" d="M12 4.9c1.4 0 2.7.5 3.8 1.5l2.8-2.8C16.8 1.9 14.6 1 12 1 8.2 1 5 3.2 3.3 6.6L6.4 9c.8-2.3 3-4.1 5.6-4.1z" />
+    </svg>
+);
+
 const Logo: React.FC = () => (
     <div className="flex items-center space-x-2 justify-center">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -24,6 +33,7 @@ const RegistrationPage: React.FC = () => {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
+    const [googleLoading, setGoogleLoading] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -63,6 +73,19 @@ const RegistrationPage: React.FC = () => {
         }
     };
 
+    const handleGoogleSignup = async () => {
+        setError('');
+        setSuccess('');
+        setGoogleLoading(true);
+
+        try {
+            await authAPI.signInWithGoogle('#/dashboard');
+        } catch (err: any) {
+            setError(err.message || 'Google sign in failed.');
+            setGoogleLoading(false);
+        }
+    };
+
     return (
         <div className="bg-brand-dark ds-noise text-white font-sans min-h-screen flex items-center justify-center p-4">
              <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-[#1a0a36] to-brand-dark z-0"></div>
@@ -74,6 +97,20 @@ const RegistrationPage: React.FC = () => {
                     <h1 className="text-2xl font-bold mt-4">Create Your Account</h1>
                 </div>
                 <form className="space-y-4" onSubmit={handleSubmit}>
+                    <button
+                        type="button"
+                        onClick={handleGoogleSignup}
+                        disabled={loading || googleLoading}
+                        className="w-full bg-white/10 hover:bg-white/20 transition-colors text-white font-semibold p-3 rounded-lg border border-white/10 flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <GoogleIcon />
+                        <span>{googleLoading ? 'Redirecting to Google...' : 'Sign up with Google'}</span>
+                    </button>
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span className="h-px flex-1 bg-white/10"></span>
+                        <span>or create with email</span>
+                        <span className="h-px flex-1 bg-white/10"></span>
+                    </div>
                     <div>
                         <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-2">Username</label>
                         <input 
@@ -117,7 +154,7 @@ const RegistrationPage: React.FC = () => {
                     <div>
                         <button 
                             type="submit" 
-                            disabled={loading}
+                            disabled={loading || googleLoading}
                             className="w-full bg-gradient-to-r from-brand-accent to-brand-purple hover:opacity-90 transition-opacity text-white font-semibold p-3 rounded-lg shadow-purple-glow-sm mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {loading ? 'Creating Account...' : 'Create Account'}

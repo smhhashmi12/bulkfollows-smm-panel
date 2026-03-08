@@ -5,6 +5,7 @@ import {
   supabaseConfigured,
   supabaseAdminConfigured,
 } from '../lib/supabaseServer.js';
+import { AUTH_COOKIE_NAMES } from '../lib/authCookies.js';
 
 const router = express.Router();
 
@@ -81,6 +82,7 @@ router.get('/me', async (req, res) => {
 
       // Common Supabase cookie and localStorage keys to check for a session
       const possibleKeys = [
+        AUTH_COOKIE_NAMES.accessToken,
         'sb:token',
         'sb-token',
         'sb_session',

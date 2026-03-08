@@ -1,157 +1,345 @@
-import React, { useState, useEffect, useRef } from 'react';
-import LandingPage from './pages/LandingPage';
-import UserDashboard from './pages/UserDashboard';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminLoginPage from './pages/admin/AdminLogin';
-import UserLoginPage from './pages/UserLogin';
-import RegistrationPage from './pages/RegistrationPage';
+import React, { Suspense, lazy, startTransition, useEffect, useRef, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { authAPI } from './lib/api';
 import { CurrencyProvider } from './lib/CurrencyContext';
 import { NotificationProvider } from './lib/NotificationContext';
-import LiveChatWidget from './components/LiveChatWidget';
-import { Analytics } from '@vercel/analytics/react';
 
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const UserDashboard = lazy(() => import('./pages/UserDashboard'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminLoginPage = lazy(() => import('./pages/admin/AdminLogin'));
+const UserLoginPage = lazy(() => import('./pages/UserLogin'));
+const RegistrationPage = lazy(() => import('./pages/RegistrationPage'));
+const LiveChatWidget = lazy(() => import('./components/LiveChatWidget'));
+const Analytics = lazy(async () => {
+  const module = await import('@vercel/analytics/react');
+  return { default: module.Analytics };
+});
 
-// Define a type for the user object for better type safety.
+const USER_CACHE_KEY = 'app.currentUser';
+
 export type User = {
   id?: string;
   username: string;
   role: 'user' | 'admin';
 };
 
+const readCachedUser = (): User | null => {
+  try {
+    const raw = window.localStorage.getItem(USER_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as User;
+    if (!parsed?.username || !parsed?.role) return null;
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedUser = (user: User | null) => {
+  if (!user) {
+    window.localStorage.removeItem(USER_CACHE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+};
+
+const getBootstrapUserFromSession = (session: Session): User | null => {
+  const username =
+    String(session.user.user_metadata?.username || '').trim() ||
+    String(session.user.email || '').split('@')[0]?.trim() ||
+    '';
+
+  if (!username) {
+    return null;
+  }
+
+  return {
+    id: session.user.id,
+    username,
+    role: session.user.app_metadata?.role === 'admin' ? 'admin' : 'user',
+  };
+};
+
+const AppLoadingScreen: React.FC<{ message?: string }> = ({ message = 'Loading...' }) => (
+  <div className="bg-brand-dark ds-noise text-white font-sans min-h-screen flex items-center justify-center">
+    <div className="text-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-purple mx-auto mb-4"></div>
+      <p>{message}</p>
+    </div>
+  </div>
+);
+
+const AuthRecoveryScreen: React.FC<{
+  message: string;
+  onRetry: () => void;
+  onLogout: () => void;
+}> = ({ message, onRetry, onLogout }) => (
+  <div className="bg-brand-dark ds-noise text-white font-sans min-h-screen flex items-center justify-center p-4">
+    <div className="w-full max-w-md bg-brand-container border border-brand-border rounded-2xl p-8 text-center">
+      <h1 className="text-2xl font-bold mb-3">Session Needs Attention</h1>
+      <p className="text-sm text-gray-300 mb-6">{message}</p>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <button onClick={onRetry} className="ds-btn-primary flex-1 px-4 py-3 rounded-lg font-semibold">
+          Retry Session Restore
+        </button>
+        <button onClick={onLogout} className="ds-btn-secondary flex-1 px-4 py-3 rounded-lg font-semibold">
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 const App: React.FC = () => {
-  const [route, setRoute] = useState(window.location.hash);
-  // A single state to hold the current logged-in user object or null.
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const initialCachedUser = readCachedUser();
+  const [route, setRoute] = useState(window.location.hash || '#/');
+  const [currentUser, setCurrentUser] = useState<User | null>(initialCachedUser);
+  const [hasSession, setHasSession] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [profileRefreshing, setProfileRefreshing] = useState(false);
+  const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
+  const [deferredUiReady, setDeferredUiReady] = useState(false);
   const sessionCheckDone = useRef(false);
-  const currentUserRef = useRef<User | null>(null);
+  const currentUserRef = useRef<User | null>(initialCachedUser);
+  const profileRefreshRef = useRef<Promise<User | null> | null>(null);
+
+  const persistCurrentUser = (user: User | null) => {
+    currentUserRef.current = user;
+    setCurrentUser(user);
+    writeCachedUser(user);
+  };
+
+  const restoreCachedUser = (sessionUserId?: string) => {
+    const cachedUser = readCachedUser();
+
+    if (!cachedUser) {
+      return null;
+    }
+
+    if (sessionUserId && cachedUser.id && cachedUser.id !== sessionUserId) {
+      writeCachedUser(null);
+      if (currentUserRef.current?.id === cachedUser.id) {
+        persistCurrentUser(null);
+      }
+      return null;
+    }
+
+    if (cachedUser.id && sessionUserId && cachedUser.id !== sessionUserId) {
+      return null;
+    }
+
+    persistCurrentUser(cachedUser);
+    return cachedUser;
+  };
+
+  const refreshCurrentUser = async (reason: string) => {
+    if (profileRefreshRef.current) {
+      return profileRefreshRef.current;
+    }
+
+    setProfileRefreshing(true);
+    setAuthRecoveryMessage(null);
+
+    const task = (async () => {
+      try {
+        const user = await authAPI.getCurrentUser();
+
+        if (user) {
+          persistCurrentUser(user);
+          return user;
+        }
+
+        if (!currentUserRef.current) {
+          setAuthRecoveryMessage('Your auth token is still present, but the account profile could not be restored.');
+        }
+
+        return currentUserRef.current;
+      } catch (error) {
+        console.error(`[Auth] Failed to refresh user profile during ${reason}:`, error);
+
+        if (!currentUserRef.current) {
+          setAuthRecoveryMessage('A valid session exists, but the profile lookup is failing or timing out.');
+        }
+
+        return currentUserRef.current;
+      } finally {
+        profileRefreshRef.current = null;
+        setProfileRefreshing(false);
+      }
+    })();
+
+    profileRefreshRef.current = task;
+    return task;
+  };
+
+  const syncSession = async (session: Session | null, reason: string, awaitProfile: boolean) => {
+    if (!session) {
+      setHasSession(false);
+      setAuthRecoveryMessage(null);
+      persistCurrentUser(null);
+      setLoading(false);
+      return;
+    }
+
+    setHasSession(true);
+
+    const cachedUser = restoreCachedUser(session.user.id);
+    if (!cachedUser && currentUserRef.current?.id && currentUserRef.current.id !== session.user.id) {
+      persistCurrentUser(null);
+    }
+
+    const bootstrapUser = cachedUser ?? getBootstrapUserFromSession(session);
+    if (!cachedUser && bootstrapUser) {
+      persistCurrentUser(bootstrapUser);
+    }
+
+    const refreshTask = refreshCurrentUser(reason);
+    if (awaitProfile && !cachedUser && !bootstrapUser) {
+      await refreshTask;
+    }
+
+    setLoading(false);
+  };
+
+  const retrySessionRestore = async () => {
+    setLoading(true);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      await syncSession(session, 'manual retry', true);
+    } catch (error) {
+      console.error('[Auth] Manual session restore failed:', error);
+      setAuthRecoveryMessage('Session restore failed again. Signing out and logging in again is safer.');
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    currentUserRef.current = currentUser;
-  }, [currentUser]);
+    const requestIdle =
+      'requestIdleCallback' in window
+        ? (window.requestIdleCallback as (callback: IdleRequestCallback, options?: IdleRequestOptions) => number)
+        : null;
+    const cancelIdle =
+      'cancelIdleCallback' in window
+        ? (window.cancelIdleCallback as (handle: number) => void)
+        : null;
+
+    let cancelled = false;
+    let fallbackId: number | null = null;
+    let idleId: number | null = null;
+
+    const enableDeferredUi = () => {
+      if (cancelled) return;
+      startTransition(() => {
+        setDeferredUiReady(true);
+      });
+    };
+
+    if (requestIdle) {
+      idleId = requestIdle(enableDeferredUi, { timeout: 1500 });
+    } else {
+      fallbackId = window.setTimeout(enableDeferredUi, 1200);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId !== null && cancelIdle) {
+        cancelIdle(idleId);
+      }
+      if (fallbackId !== null) {
+        window.clearTimeout(fallbackId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
-    // Check for existing session on mount
     const initializeAuth = async () => {
       if (sessionCheckDone.current) return;
       sessionCheckDone.current = true;
 
       try {
-        console.log('[Auth] Initializing auth - checking for existing session...');
-        
-        // First, check if there's a session in localStorage
-        const authTokenStr = window.localStorage.getItem('supabase.auth.token');
-        if (authTokenStr) {
-          console.log('[Auth] Auth token found in localStorage');
-        } else {
-          console.log('[Auth] No auth token in localStorage');
-        }
-        
-        // Get current session from Supabase (this will restore from localStorage)
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('[Auth] Error getting session:', sessionError);
-          setLoading(false);
-          return;
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+
+        if (error) {
+          throw error;
         }
 
-        if (session) {
-          console.log('[Auth] Session found, user:', session.user.email);
-          // Session exists, fetch current user profile
-          try {
-            const user = await authAPI.getCurrentUser();
-            if (user) {
-              console.log('[Auth] User profile loaded:', user.username);
-              setCurrentUser(user);
-            } else {
-              console.warn('[Auth] Session exists but no user profile found');
-              setCurrentUser(null);
-            }
-          } catch (error) {
-            console.error('[Auth] Failed to fetch user profile:', error);
-            setCurrentUser(null);
-          }
-        } else {
-          console.log('[Auth] No session found - user needs to login');
-          setCurrentUser(null);
-        }
+        const cachedUser = readCachedUser();
+        const shouldAwaitProfile = !(cachedUser && session?.user?.id && cachedUser.id === session.user.id);
+
+        await syncSession(session, 'initial session', shouldAwaitProfile);
       } catch (error) {
         console.error('[Auth] Error during auth initialization:', error);
-        setCurrentUser(null);
-      } finally {
+        setHasSession(false);
+        persistCurrentUser(null);
         setLoading(false);
       }
     };
 
     initializeAuth();
 
-    // Listen for auth state changes (sign in, sign out, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[Auth] Event:', event, 'Session:', !!session);
-      
-      if (event === 'SIGNED_IN') {
-        // User just signed in
-        console.log('[Auth] User SIGNED_IN');
-        if (session) {
-          try {
-            console.log('[Auth] Fetching user profile after sign in...');
-            const user = await authAPI.getCurrentUser();
-            if (user) {
-              console.log('[Auth] User profile loaded after sign in:', user.username);
-              setCurrentUser(user);
-            }
-          } catch (error) {
-            console.error('[Auth] Failed to fetch user profile:', error);
-            setCurrentUser(null);
-          }
-        }
-      } else if (event === 'TOKEN_REFRESHED') {
-        // Token was auto-refreshed (session still valid)
-        console.log('[Auth] TOKEN_REFRESHED - Session still valid');
-        // User is still logged in, no need to fetch profile again
-      } else if (event === 'SIGNED_OUT') {
-        // User signed out
-        console.log('[Auth] User SIGNED_OUT');
-        setCurrentUser(null);
-      } else if (event === 'INITIAL_SESSION') {
-        // This event fires when Supabase first loads the session from storage
-        console.log('[Auth] INITIAL_SESSION event');
-        if (session) {
-          try {
-            const user = await authAPI.getCurrentUser();
-            if (user) {
-              console.log('[Auth] User profile from INITIAL_SESSION:', user.username);
-              setCurrentUser(user);
-            }
-          } catch (error) {
-            console.error('[Auth] Failed to fetch user profile:', error);
-          }
-        }
+
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        setHasSession(false);
+        setAuthRecoveryMessage(null);
+        persistCurrentUser(null);
+        setLoading(false);
+        return;
       }
+
+      if (!session) {
+        return;
+      }
+
+      const shouldAwaitProfile = event === 'SIGNED_IN' || !currentUserRef.current;
+      await syncSession(session, `auth event: ${event}`, shouldAwaitProfile);
     });
 
-    // Listen for visibility changes to re-check session when tab comes back to focus
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[Auth] Page became visible, checking session...');
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session && !currentUserRef.current) {
-            console.log('[Auth] Session recovered on visibility change');
-            const user = await authAPI.getCurrentUser();
-            if (user) {
-              setCurrentUser(user);
-            }
-          } else if (!session && currentUserRef.current) {
-            console.log('[Auth] Session expired while page was hidden');
-            setCurrentUser(null);
-          }
-        } catch (error) {
-          console.error('[Auth] Error checking session on visibility change:', error);
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          setHasSession(false);
+          persistCurrentUser(null);
+          return;
         }
+
+        setHasSession(true);
+        restoreCachedUser(session.user.id);
+        if (!currentUserRef.current) {
+          const bootstrapUser = getBootstrapUserFromSession(session);
+          if (bootstrapUser) {
+            persistCurrentUser(bootstrapUser);
+          }
+        }
+
+        if (!currentUserRef.current || currentUserRef.current.id !== session.user.id) {
+          await refreshCurrentUser('visibility change');
+        }
+      } catch (error) {
+        console.error('[Auth] Error checking session on visibility change:', error);
       }
     };
 
@@ -165,97 +353,136 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleHashChange = () => {
-      setRoute(window.location.hash);
+      startTransition(() => {
+        setRoute(window.location.hash || '#/');
+      });
     };
 
     window.addEventListener('hashchange', handleHashChange);
-    handleHashChange(); // Set initial route
-
-    // If the user refreshes on a protected page, check auth
-    const protectedRoutes = ['#/dashboard', '#/admin'];
-  if (protectedRoutes.some(r => window.location.hash.startsWith(r)) && !currentUser && !loading) {
-    window.location.hash = '#/';
-  }
+    handleHashChange();
 
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
     };
-  }, [currentUser, loading]);
+  }, []);
 
   const handleLogin = (user: User) => {
-    setCurrentUser(user);
+    setHasSession(true);
+    setAuthRecoveryMessage(null);
+    persistCurrentUser(user);
+
     if (user.role === 'admin') {
       window.location.hash = '#/admin/dashboard';
-    } else {
-      window.location.hash = '#/dashboard';
+      return;
     }
+
+    window.location.hash = '#/dashboard';
   };
 
   const handleLogout = async () => {
     try {
       await authAPI.signOut();
-      setCurrentUser(null);
-      window.location.hash = '#/'; // Redirect to landing page on logout.
     } catch (error) {
       console.error('Logout error:', error);
+    } finally {
+      setHasSession(false);
+      setAuthRecoveryMessage(null);
+      persistCurrentUser(null);
+      window.location.hash = '#/';
     }
   };
 
-  if (loading) {
-    return (
-      <div className="bg-brand-dark ds-noise text-white font-sans min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-purple mx-auto mb-4"></div>
-          <p>Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
   const renderPage = () => {
-    // Admin Routes
     if (route.startsWith('#/admin')) {
+      if (loading || (hasSession && !currentUser && profileRefreshing)) {
+        return <AppLoadingScreen message="Restoring admin session..." />;
+      }
+
       if (currentUser?.role === 'admin') {
         return <AdminDashboard onLogout={handleLogout} />;
       }
+
+      if (hasSession && authRecoveryMessage) {
+        return (
+          <AuthRecoveryScreen
+            message={authRecoveryMessage}
+            onRetry={retrySessionRestore}
+            onLogout={handleLogout}
+          />
+        );
+      }
+
       return <AdminLoginPage onLoginSuccess={handleLogin} />;
     }
-    
-    // User Dashboard Routes
+
     if (route.startsWith('#/dashboard')) {
-      if (currentUser) { // Any logged-in user can see their dashboard
+      if (loading || (hasSession && !currentUser && profileRefreshing)) {
+        return <AppLoadingScreen message="Restoring session..." />;
+      }
+
+      if (currentUser?.role === 'admin') {
+        window.location.hash = '#/admin/dashboard';
+        return <AppLoadingScreen message="Redirecting..." />;
+      }
+
+      if (currentUser) {
         return <UserDashboard user={currentUser} onLogout={handleLogout} />;
       }
-       // If not logged in, redirect to user login
+
+      if (hasSession && authRecoveryMessage) {
+        return (
+          <AuthRecoveryScreen
+            message={authRecoveryMessage}
+            onRetry={retrySessionRestore}
+            onLogout={handleLogout}
+          />
+        );
+      }
+
       window.location.hash = '#/login';
       return <UserLoginPage onLoginSuccess={handleLogin} />;
     }
-    
-    // User Login Page
-    if (route === '#/login') {
-        return <UserLoginPage onLoginSuccess={handleLogin} />;
+
+    if ((route === '#/login' || route === '#/register') && currentUser?.role === 'admin') {
+      window.location.hash = '#/admin/dashboard';
+      return <AppLoadingScreen message="Redirecting..." />;
     }
 
-    // Registration Page
+    if ((route === '#/login' || route === '#/register') && currentUser) {
+      window.location.hash = '#/dashboard';
+      return <AppLoadingScreen message="Redirecting..." />;
+    }
+
+    if (route === '#/login') {
+      return <UserLoginPage onLoginSuccess={handleLogin} />;
+    }
+
     if (route === '#/register') {
       return <RegistrationPage />;
     }
 
-    // Default to Landing Page
-    return <LandingPage currentUser={currentUser} onLogout={handleLogout} onLoginSuccess={handleLogin} />;
+    return <LandingPage currentUser={currentUser} onLogout={handleLogout} />;
   };
 
   const shouldShowChat = !route.startsWith('#/admin');
+  const shouldShowAnalytics =
+    deferredUiReady && !['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   return (
     <>
       <NotificationProvider>
         <CurrencyProvider>
-          {renderPage()}
-          {shouldShowChat && <LiveChatWidget />}
+          <Suspense fallback={<AppLoadingScreen />}>
+            {renderPage()}
+            {deferredUiReady && shouldShowChat ? <LiveChatWidget /> : null}
+          </Suspense>
         </CurrencyProvider>
       </NotificationProvider>
-      <Analytics />
+      {shouldShowAnalytics ? (
+        <Suspense fallback={null}>
+          <Analytics />
+        </Suspense>
+      ) : null}
     </>
   );
 };

@@ -1,5 +1,6 @@
 
 import React from 'react';
+import worldMapIllustration from '../assets/world-map.svg';
 
 const panelServices = [
     { title: 'X smm panel', description: 'Boost your X presence with our X SMM services. Get more likes, shares, and followers.' },
@@ -14,7 +15,13 @@ const SmmPanelServices: React.FC = () => {
                 <div className="text-left">
                     <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold leading-tight mb-6">Cheapest Smm Reseller Panel</h2>
                     <div className="relative">
-                        <img src="https://i.imgur.com/KxX81S5.png" alt="World Map" className="w-full" />
+                        <img
+                            src={worldMapIllustration}
+                            alt="World Map"
+                            className="w-full"
+                            loading="lazy"
+                            decoding="async"
+                        />
                     </div>
                 </div>
                 <div className="flex flex-col gap-6">

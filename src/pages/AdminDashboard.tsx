@@ -1,25 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import Sidebar from '../components/admin/Sidebar';
 import AdminHeader from '../components/admin/Header';
 import { DashboardLayout } from '../design-system';
-import AdminDashboardPage from './admin/Dashboard';
-import UserManagementPage from './admin/UserManagement';
-import ServiceManagementPage from './admin/ServiceManagement';
-import ProviderManagementPage from './admin/ProviderManagement';
-import ProviderServiceManagementPage from './admin/ProviderServiceManagement';
-import SettingsPage from './admin/SettingsPanel';
-import OrderManagementPage from './admin/OrderManagement';
-import PaymentLogsPage from './admin/PaymentLogs';
-import SupportTicketsPage from './admin/SupportTickets';
-import AnnouncementsPage from './admin/Announcements';
-import EarningsDashboardPage from './admin/EarningsDashboard';
-import ProviderPayoutsPage from './admin/ProviderPayouts';
-import AdminChatPage from './admin/Chat';
+const AdminDashboardPage = lazy(() => import('./admin/Dashboard'));
+const UserManagementPage = lazy(() => import('./admin/UserManagement'));
+const ServiceManagementPage = lazy(() => import('./admin/ServiceManagement'));
+const ProviderManagementPage = lazy(() => import('./admin/ProviderManagement'));
+const ProviderServiceManagementPage = lazy(() => import('./admin/ProviderServiceManagement'));
+const SettingsPage = lazy(() => import('./admin/SettingsPanel'));
+const OrderManagementPage = lazy(() => import('./admin/OrderManagement'));
+const PaymentLogsPage = lazy(() => import('./admin/PaymentLogs'));
+const SupportTicketsPage = lazy(() => import('./admin/SupportTickets'));
+const AnnouncementsPage = lazy(() => import('./admin/Announcements'));
+const EarningsDashboardPage = lazy(() => import('./admin/EarningsDashboard'));
+const ProviderPayoutsPage = lazy(() => import('./admin/ProviderPayouts'));
+const AdminChatPage = lazy(() => import('./admin/Chat'));
 
 
 const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     const [page, setPage] = useState('dashboard');
     const [sidebarOpen, setSidebarOpen] = useState(false);
+
+    const pageFallback = (
+        <div className="bg-brand-container border border-brand-border rounded-2xl p-8 text-center text-gray-300">
+            Loading page...
+        </div>
+    );
     
     useEffect(() => {
         const handleHashChange = () => {
@@ -57,7 +63,9 @@ const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             sidebar={<Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
             navbar={<AdminHeader onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />}
         >
-            {renderPage()}
+            <Suspense fallback={pageFallback}>
+                {renderPage()}
+            </Suspense>
         </DashboardLayout>
     );
 };

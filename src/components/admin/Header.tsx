@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useCurrency, currencies } from '../../lib/CurrencyContext';
 import { useNotifications } from '../../lib/NotificationContext';
+import { getAvatarDataUri } from '../../lib/avatar';
 
 const AdminHeader: React.FC<{ onLogout: () => void; onToggleSidebar?: () => void }> = ({ onLogout, onToggleSidebar }) => {
     const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -129,7 +130,7 @@ const AdminHeader: React.FC<{ onLogout: () => void; onToggleSidebar?: () => void
                 </div>
                 <div className="relative">
                     <button onClick={() => setDropdownOpen(!dropdownOpen)} className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition">
-                        <img src="https://i.pravatar.cc/150?u=admin" alt="Admin Avatar" className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-brand-purple" />
+                        <img src={getAvatarDataUri('admin')} alt="Admin Avatar" className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-brand-purple" />
                         <div className="hidden sm:block">
                             <p className="font-semibold text-sm text-left">Admin</p>
                             <p className="text-xs text-gray-400">Superuser</p>

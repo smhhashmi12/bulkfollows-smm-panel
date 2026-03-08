@@ -66,7 +66,8 @@ async function createAdmin(email, password, username) {
     email,
     password,
     email_confirm: true,
-    user_metadata: { username }
+    user_metadata: { username },
+    app_metadata: { role: 'admin' },
   });
 
   if (error) {
@@ -78,14 +79,16 @@ async function createAdmin(email, password, username) {
     const user = (found && found.users && found.users.length && found.users[0]) || null;
     if (!user) throw new Error('Failed to create and could not find existing user');
     console.log('Using existing user', user.id);
-    await ensureUserProfile(user.id, email, username);
+    const profile = await ensureUserProfile(user.id, email, username);
+    await syncAdminAuthMetadata(user.id, profile?.username || username || email.split('@')[0]);
     await setAdminRole(user.id);
     return user;
   }
 
   const user = data?.user || data; // supabase-js shape varies
   if (!user) throw new Error('Failed to create user (no user returned)');
-  await ensureUserProfile(user.id, email, username);
+  const profile = await ensureUserProfile(user.id, email, username);
+  await syncAdminAuthMetadata(user.id, profile?.username || username || email.split('@')[0]);
   await setAdminRole(user.id);
   return user;
 }
@@ -104,6 +107,15 @@ async function ensureUserProfile(userId, email, username) {
   }
 
   const { data, error } = await supabase.from('user_profiles').upsert({ id: userId, email, username: candidate }, { onConflict: 'id' }).select();
+  if (error) throw error;
+  return data?.[0] || { id: userId, email, username: candidate };
+}
+
+async function syncAdminAuthMetadata(userId, username) {
+  const { data, error } = await supabase.auth.admin.updateUserById(userId, {
+    user_metadata: { username },
+    app_metadata: { role: 'admin' },
+  });
   if (error) throw error;
   return data;
 }

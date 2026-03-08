@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { User } from '../../App';
+import type { User } from '../../App';
 import { useCurrency, currencies } from '../../lib/CurrencyContext';
 import { useNotifications } from '../../lib/NotificationContext';
+import { getAvatarDataUri } from '../../lib/avatar';
 
 interface DashboardHeaderProps {
     user: User;
@@ -140,7 +141,7 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                     </div>
                     <div className="relative">
                         <button onClick={() => setDropdownOpen(!dropdownOpen)} className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition">
-                           <img src={`https://i.pravatar.cc/150?u=${user.username}`} alt="User Avatar" className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-brand-purple" />
+                           <img src={getAvatarDataUri(user.username)} alt="User Avatar" className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-brand-purple" />
                         </button>
                          {dropdownOpen && (
                              <div className="absolute right-0 mt-2 w-48 max-w-[90vw] ds-dropdown rounded-lg shadow-lg py-1 z-20">

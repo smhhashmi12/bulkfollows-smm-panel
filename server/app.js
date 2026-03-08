@@ -11,6 +11,7 @@ dotenv.config();
 
 const app = express();
 
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
@@ -46,9 +47,31 @@ app.use((req, res, next) => {
 
 if (process.env.SERVE_STATIC === '1' || process.env.NODE_ENV === 'production' || process.env.VERCEL) {
   const distPath = path.join(process.cwd(), 'dist');
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    etag: true,
+    maxAge: '1h',
+    setHeaders: (res, filePath) => {
+      const normalizedPath = filePath.replace(/\\/g, '/');
+
+      if (normalizedPath.endsWith('/index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+        return;
+      }
+
+      if (normalizedPath.includes('/assets/')) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return;
+      }
+
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    },
+  }));
   app.get('*', (req, res, next) => {
     if (req.originalUrl.startsWith('/api/') || req.originalUrl.startsWith('/webhook/')) return next();
+    if (path.extname(req.path)) {
+      return res.status(404).end();
+    }
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
@@ -60,6 +83,7 @@ async function registerRoutes() {
   });
 
   const [
+    { default: authRouter },
     { default: servicesRouter },
     { default: webhookRouter },
     { default: integrationsRouter },
@@ -68,6 +92,7 @@ async function registerRoutes() {
     { default: paymentsRouter },
     { default: providerRouter },
   ] = await Promise.all([
+    import('./routes/auth.js'),
     import('./routes/services.js'),
     import('./routes/webhook.js'),
     import('./routes/integrations.js'),
@@ -77,6 +102,7 @@ async function registerRoutes() {
     import('./routes/provider.js'),
   ]);
 
+  app.use('/api/auth', authRouter);
   app.use('/api/admin/services', servicesRouter);
   app.use('/webhook/fastpay', webhookRouter);
   app.use('/api/webhook/fastpay', webhookRouter);

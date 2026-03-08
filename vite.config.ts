@@ -48,25 +48,11 @@ export default defineConfig(({ mode }) => {
         },
         rollupOptions: {
           output: {
-            manualChunks(id) {
-              // Vendor chunks for better caching
-              if (id.includes('node_modules')) {
-                if (id.includes('@supabase')) {
-                  return 'supabase';
-                }
-                if (id.includes('react')) {
-                  return 'react-vendor';
-                }
-                return 'vendor';
-              }
-              // Page-specific chunks
-              if (id.includes('pages/')) {
-                const match = id.match(/pages\/([^/]+)/);
-                if (match) {
-                  return `page-${match[1]}`;
-                }
-              }
-            }
+            manualChunks: {
+              'react-vendor': ['react', 'react-dom'],
+              supabase: ['@supabase/supabase-js'],
+              'feature-analytics': ['@vercel/analytics/react'],
+            },
           }
         },
         cssCodeSplit: true,

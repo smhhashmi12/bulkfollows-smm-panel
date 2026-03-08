@@ -1,5 +1,6 @@
 
 import React from 'react';
+import aboutDashboardIllustration from '../assets/about-dashboard.svg';
 
 const About: React.FC = () => {
   return (
@@ -14,7 +15,13 @@ const About: React.FC = () => {
             Bulkfollows is a globally recognized platform offering top-notch SMM services. Whether you're in the United States, India, or Turkey, you can access our services anywhere, anytime. Our panel is designed to be user-friendly and cost-effective, providing the best value for your money.
           </p>
           <div className="mt-auto bg-black/30 rounded-2xl p-4 border border-brand-border flex-grow flex items-center justify-center">
-             <img src="https://i.imgur.com/k9vYf4b.png" alt="Bulkfollows Dashboard" className="rounded-lg object-cover" />
+             <img
+               src={aboutDashboardIllustration}
+               alt="Bulkfollows Dashboard"
+               className="rounded-lg object-cover"
+               loading="lazy"
+               decoding="async"
+             />
           </div>
         </div>
         <div className="bg-brand-container border border-brand-border rounded-3xl p-8 flex flex-col text-left">

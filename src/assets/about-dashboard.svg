@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title desc">
+  <title id="title">Bulkfollows dashboard preview</title>
+  <desc id="desc">Stylized dashboard cards and charts on a dark gradient background.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f2937" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect width="640" height="420" rx="32" fill="url(#bg)" />
+  <circle cx="120" cy="84" r="70" fill="#8b5cf6" opacity="0.16" />
+  <circle cx="538" cy="72" r="88" fill="#3b82f6" opacity="0.14" />
+  <rect x="38" y="38" width="564" height="344" rx="24" fill="#0b1120" opacity="0.82" stroke="#ffffff" stroke-opacity="0.08" />
+  <rect x="62" y="72" width="144" height="276" rx="20" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.08" />
+  <rect x="230" y="72" width="156" height="116" rx="20" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.08" />
+  <rect x="410" y="72" width="168" height="116" rx="20" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.08" />
+  <rect x="230" y="212" width="348" height="136" rx="20" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.08" />
+  <rect x="84" y="100" width="100" height="16" rx="8" fill="#ffffff" opacity="0.9" />
+  <rect x="84" y="132" width="78" height="10" rx="5" fill="#94a3b8" />
+  <rect x="84" y="170" width="100" height="72" rx="16" fill="#111827" stroke="#ffffff" stroke-opacity="0.05" />
+  <rect x="84" y="260" width="100" height="12" rx="6" fill="#374151" />
+  <rect x="84" y="286" width="78" height="12" rx="6" fill="#374151" />
+  <rect x="254" y="100" width="86" height="14" rx="7" fill="#ffffff" opacity="0.9" />
+  <rect x="254" y="128" width="58" height="10" rx="5" fill="#94a3b8" />
+  <text x="254" y="170" fill="#f8fafc" font-family="Arial, sans-serif" font-size="34" font-weight="700">$12.4K</text>
+  <rect x="434" y="100" width="88" height="14" rx="7" fill="#ffffff" opacity="0.9" />
+  <rect x="434" y="128" width="66" height="10" rx="5" fill="#94a3b8" />
+  <text x="434" y="170" fill="#f8fafc" font-family="Arial, sans-serif" font-size="34" font-weight="700">2,894</text>
+  <path d="M260 305 C292 250 322 260 350 290 S404 336 436 288 498 248 548 272" fill="none" stroke="url(#accent)" stroke-width="10" stroke-linecap="round" />
+  <circle cx="548" cy="272" r="9" fill="#ec4899" />
+  <rect x="256" y="236" width="118" height="14" rx="7" fill="#ffffff" opacity="0.9" />
+  <rect x="256" y="262" width="146" height="10" rx="5" fill="#94a3b8" />
+</svg>
