@@ -136,14 +136,14 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
     const balanceLabel = balanceLoading && balance === null ? '...' : formatAmount(balance ?? 0);
 
     return (
-        <header className="ds-topbar flex items-center justify-between gap-3 px-4 py-4">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
+        <header className="ds-topbar flex items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-4 sm:py-4">
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
                 <button
                     onClick={onToggleSidebar}
                     className="shrink-0 text-gray-400 transition hover:text-white md:hidden"
                     aria-label="Open menu"
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M3 5h14a1 1 0 010 2H3a1 1 0 110-2zm0 4h14a1 1 0 110 2H3a1 1 0 110-2zm0 4h14a1 1 0 110 2H3a1 1 0 110-2z" clipRule="evenodd" />
                     </svg>
                 </button>
@@ -154,16 +154,16 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                 </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-                <div className="inline-flex h-10 items-center gap-2 rounded-full border border-brand-border bg-white/5 px-3 text-xs font-semibold text-white sm:text-sm">
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+                <div className="inline-flex h-9 max-w-[96px] min-w-0 items-center gap-1.5 rounded-full border border-brand-border bg-white/5 px-2 text-[11px] font-semibold text-white sm:h-10 sm:max-w-none sm:gap-2 sm:px-3 sm:text-sm">
                     <BalanceIcon />
-                    <span>{balanceLabel}</span>
+                    <span className="truncate">{balanceLabel}</span>
                 </div>
 
                 <div className="relative">
                     <button
                         onClick={() => setCurrencyDropdownOpen(!currencyDropdownOpen)}
-                        className="inline-flex h-10 w-10 items-center justify-center gap-2 rounded-full border border-brand-border bg-white/5 text-xs font-semibold text-gray-200 transition hover:text-white sm:h-11 sm:w-auto sm:px-3 sm:text-sm"
+                        className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-full border border-brand-border bg-white/5 text-xs font-semibold text-gray-200 transition hover:text-white sm:h-11 sm:w-auto sm:px-3 sm:text-sm"
                         aria-label="Change currency"
                     >
                         <CurrencyIcon />
@@ -197,7 +197,7 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
 
                 <a
                     href="#/dashboard/add-funds"
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-brand-border bg-white/5 text-white transition hover:bg-white/10 sm:h-11 sm:w-11"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-brand-border bg-white/5 text-white transition hover:bg-white/10 sm:h-11 sm:w-11"
                     aria-label="Add Funds"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -208,7 +208,7 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                 <div className="relative">
                     <button
                         onClick={() => setNotificationDropdownOpen(!notificationDropdownOpen)}
-                        className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-brand-border bg-white/5 text-gray-400 transition hover:text-white sm:h-11 sm:w-11"
+                        className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-brand-border bg-white/5 text-gray-400 transition hover:text-white sm:h-11 sm:w-11"
                         aria-label="Notifications"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -222,15 +222,15 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                     </button>
 
                     {notificationDropdownOpen && (
-                        <div className="ds-dropdown ds-scrollbar absolute right-0 z-20 mt-2 max-h-96 w-[calc(100vw-2rem)] max-w-[20rem] overflow-y-auto rounded-lg shadow-lg sm:w-80 sm:max-w-[90vw]">
-                            <div className="sticky top-0 flex items-center justify-between border-b border-brand-border bg-[#0b0f1a]/95 px-4 py-3">
+                        <div className="ds-dropdown ds-scrollbar fixed left-3 right-3 top-[4.5rem] z-20 max-h-[min(26rem,calc(100vh-6rem))] overflow-y-auto rounded-lg shadow-lg sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 sm:max-h-96 sm:max-w-[90vw]">
+                            <div className="sticky top-0 flex items-center justify-between gap-3 border-b border-brand-border bg-[#0b0f1a]/95 px-4 py-3">
                                 <h3 className="font-bold text-white">Notifications</h3>
                                 {unreadCount > 0 && (
                                     <button
                                         onClick={() => {
                                             markAllAsRead();
                                         }}
-                                        className="text-xs text-brand-purple transition hover:text-brand-accent"
+                                        className="shrink-0 text-[11px] text-brand-purple transition hover:text-brand-accent sm:text-xs"
                                     >
                                         Mark all as read
                                     </button>
@@ -252,12 +252,12 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                                             }`}
                                         >
                                             <div className="flex items-start justify-between gap-2">
-                                                <div className="flex-1">
+                                                <div className="min-w-0 flex-1">
                                                     <div className="flex items-center gap-2">
-                                                        <h4 className="text-sm font-semibold text-white">{notification.title}</h4>
+                                                        <h4 className="truncate text-sm font-semibold text-white">{notification.title}</h4>
                                                         {!notification.read && <span className="h-2 w-2 rounded-full bg-brand-accent"></span>}
                                                     </div>
-                                                    <p className="mt-1 text-xs text-gray-400">{notification.message}</p>
+                                                    <p className="mt-1 break-words text-xs text-gray-400">{notification.message}</p>
                                                     <span className="mt-1 block text-xs text-gray-500">
                                                         {notification.timestamp.toLocaleDateString()} {notification.timestamp.toLocaleTimeString()}
                                                     </span>
@@ -284,7 +284,7 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({ user, onLogout, onTog
                 <div className="relative">
                     <button
                         onClick={() => setDropdownOpen(!dropdownOpen)}
-                        className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-brand-border bg-white/5 transition hover:opacity-80 sm:h-11 sm:w-11"
+                        className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-brand-border bg-white/5 transition hover:opacity-80 sm:h-11 sm:w-11"
                         aria-label="User menu"
                     >
                         <img src={getAvatarDataUri(user.username)} alt="User Avatar" className="h-8 w-8 rounded-full border-2 border-brand-purple sm:h-9 sm:w-9" />
