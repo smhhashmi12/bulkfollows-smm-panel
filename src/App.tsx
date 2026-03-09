@@ -376,7 +376,7 @@ const App: React.FC = () => {
       return;
     }
 
-    window.location.hash = '#/dashboard';
+    window.location.hash = '#/dashboard/new-order';
   };
 
   const handleLogout = async () => {
@@ -449,7 +449,7 @@ const App: React.FC = () => {
     }
 
     if ((route === '#/login' || route === '#/register') && currentUser) {
-      window.location.hash = '#/dashboard';
+      window.location.hash = '#/dashboard/new-order';
       return <AppLoadingScreen message="Redirecting..." />;
     }
 

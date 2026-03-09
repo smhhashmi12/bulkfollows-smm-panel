@@ -253,6 +253,11 @@ const NewOrderPage: React.FC = () => {
 
   const socialPlatforms = useMemo(() => platformMatchers, [platformMatchers]);
 
+  const visiblePlatforms = useMemo(
+    () => socialPlatforms.filter((platform) => (platformServiceStats.get(platform.key) || 0) > 0).slice(0, 12),
+    [platformServiceStats, socialPlatforms]
+  );
+
   const visibleCategories = useMemo(() => {
     let filtered = categories;
     if (categoryTypeFilter === 'social') {
@@ -493,23 +498,109 @@ const NewOrderPage: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-brand-container border border-brand-border rounded-2xl p-5 mb-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="max-w-2xl">
-            <p className="text-xs uppercase tracking-[0.24em] text-brand-accent font-semibold">Order Section</p>
-            <h2 className="mt-2 text-2xl font-bold text-white">Place the order here. Browse full services from the separate sidebar page.</h2>
-            <p className="mt-2 text-sm text-gray-400">
-              This page now stays focused on service selection, order placement, and order details only.
-            </p>
+      <section className="bg-brand-container border border-brand-border rounded-[24px] p-3 sm:p-4 mb-6 overflow-visible">
+        <div className="overflow-x-auto ds-scrollbar pb-1">
+          <div className="flex min-w-max items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedPlatform('');
+                setSelectedCategory('');
+                setSelectedService(null);
+                setServiceSearch('');
+              }}
+              className={`inline-flex h-[50px] items-center gap-3 rounded-2xl border px-4 text-sm font-semibold transition ${
+                selectedPlatform === ''
+                  ? 'border-brand-purple/60 bg-gradient-to-r from-brand-accent/20 to-brand-purple/20 text-white shadow-purple-glow-sm'
+                  : 'border-white/10 bg-white/[0.03] text-gray-200 hover:border-brand-purple/40 hover:bg-white/[0.05]'
+              }`}
+            >
+              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
+                {renderCategoryIcon('all', 'w-4 h-4')}
+              </span>
+              <span>All</span>
+            </button>
+
+            {visiblePlatforms.map((platform) => (
+              <button
+                key={platform.key}
+                type="button"
+                onClick={() => {
+                  setSelectedPlatform(platform.key);
+                  setSelectedCategory('');
+                  setSelectedService(null);
+                }}
+                className={`inline-flex h-[50px] items-center gap-3 rounded-2xl border px-4 text-sm font-semibold transition ${
+                  selectedPlatform === platform.key
+                    ? 'border-brand-purple/60 bg-gradient-to-r from-brand-accent/20 to-brand-purple/20 text-white shadow-purple-glow-sm'
+                    : 'border-white/10 bg-white/[0.03] text-gray-200 hover:border-brand-purple/40 hover:bg-white/[0.05]'
+                }`}
+              >
+                <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${getPlatformInfo(platform.label).accent}`}>
+                  {renderCategoryIcon(platform.label, 'w-4 h-4')}
+                </span>
+                <span className="whitespace-nowrap">{platform.label}</span>
+              </button>
+            ))}
           </div>
-          <a
-            href="#/dashboard/services"
-            className="inline-flex items-center justify-center rounded-xl border border-brand-border bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-          >
-            Open Services Explorer
-          </a>
         </div>
-      </div>
+
+        <div ref={searchBoxRef} className="relative mt-3">
+          <div className="relative">
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-gray-500">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3.5-3.5" />
+              </svg>
+            </span>
+            <input
+              type="text"
+              value={serviceSearch}
+              onChange={(e) => {
+                setServiceSearch(e.target.value);
+                setShowSearchSuggestions(true);
+              }}
+              onFocus={() => setShowSearchSuggestions(true)}
+              placeholder="Search service..."
+              className="h-[50px] w-full rounded-2xl border border-white/10 bg-black/30 pl-12 pr-14 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-purple"
+            />
+            {serviceSearch && (
+              <button
+                type="button"
+                onClick={() => {
+                  setServiceSearch('');
+                  setShowSearchSuggestions(false);
+                }}
+                className="absolute inset-y-0 right-2 my-1 inline-flex items-center justify-center rounded-xl px-3 text-sm font-semibold text-gray-300 transition hover:bg-white/10 hover:text-white"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {showSearchSuggestions && searchSuggestions.length > 0 && (
+            <div className="absolute left-0 right-0 z-30 mt-2 overflow-hidden rounded-2xl border border-brand-border bg-[#120a25] shadow-xl">
+              {searchSuggestions.map((service) => (
+                <button
+                  key={service.id}
+                  type="button"
+                  onClick={() => {
+                    setServiceSearch(service.name);
+                    setSelectedService(service);
+                    setSelectedCategory(service.category);
+                    setSelectedPlatform(getCategoryPlatform(service.category) || '');
+                    setShowSearchSuggestions(false);
+                  }}
+                  className="w-full border-b border-brand-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-white/5"
+                >
+                  <p className="text-sm font-medium text-white truncate">{service.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{service.category}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
       <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6">
         <div>
           <div className="bg-brand-container border border-brand-border rounded-2xl p-6">

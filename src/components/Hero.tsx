@@ -22,7 +22,7 @@ const Hero: React.FC = () => {
     setGoogleLoading(true);
 
     try {
-      await authAPI.signInWithGoogle('#/dashboard');
+      await authAPI.signInWithGoogle('#/dashboard/new-order');
     } catch (error: any) {
       setGoogleError(error.message || 'Google sign in failed.');
       setGoogleLoading(false);

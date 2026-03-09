@@ -63,7 +63,7 @@ const UserLoginPage: React.FC<UserLoginPageProps> = ({ onLoginSuccess }) => {
         setGoogleLoading(true);
 
         try {
-            await authAPI.signInWithGoogle('#/dashboard');
+            await authAPI.signInWithGoogle('#/dashboard/new-order');
         } catch (err: any) {
             setError(err.message || 'Google sign in failed.');
             setGoogleLoading(false);

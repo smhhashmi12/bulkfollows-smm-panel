@@ -199,7 +199,7 @@ export interface Provider {
 
 // Auth Functions
 export const authAPI = {
-  async signInWithGoogle(redirectHash = '#/dashboard') {
+  async signInWithGoogle(redirectHash = '#/dashboard/new-order') {
     const redirectUrl = new URL(window.location.pathname || '/', window.location.origin);
     redirectUrl.hash = redirectHash.startsWith('#') ? redirectHash : `#${redirectHash}`;
 

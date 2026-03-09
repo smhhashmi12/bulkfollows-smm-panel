@@ -102,8 +102,12 @@ const AdminHeader: React.FC<{ onLogout: () => void; onToggleSidebar?: () => void
                 <div className="relative">
                     <button 
                         onClick={() => setCurrencyDropdownOpen(!currencyDropdownOpen)} 
-                        className="ds-pill px-3 py-2 text-xs sm:text-sm font-semibold text-gray-200 hover:text-white transition"
+                        className="ds-pill inline-flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-semibold text-gray-200 hover:text-white transition"
                     >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-brand-light-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <circle cx="12" cy="12" r="8" strokeWidth="1.8" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 7v10M9.5 9.5c0-1 1-1.7 2.4-1.7 1.5 0 2.6.7 2.6 1.9 0 2.7-5 1.3-5 4 0 1.1 1 1.9 2.7 1.9 1.6 0 2.7-.8 2.9-2" />
+                        </svg>
                         {currency}
                     </button>
                     {currencyDropdownOpen && (
