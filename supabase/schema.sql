@@ -610,6 +610,7 @@ CREATE TRIGGER update_chat_channels_updated_at BEFORE UPDATE ON public.chat_chan
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- Realtime publication
+ALTER PUBLICATION supabase_realtime ADD TABLE public.announcements;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_channels;
 
