@@ -509,13 +509,13 @@ const NewOrderPage: React.FC = () => {
                 setSelectedService(null);
                 setServiceSearch('');
               }}
-              className={`inline-flex h-[50px] items-center gap-3 rounded-2xl border px-4 text-sm font-semibold transition ${
+              className={`inline-flex h-[40px] items-center gap-3 rounded-2xl border px-4 text-[10px] font-[300] transition ${
                 selectedPlatform === ''
                   ? 'border-brand-purple/60 bg-gradient-to-r from-brand-accent/20 to-brand-purple/20 text-white shadow-purple-glow-sm'
                   : 'border-white/10 bg-white/[0.03] text-gray-200 hover:border-brand-purple/40 hover:bg-white/[0.05]'
               }`}
             >
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
                 {renderCategoryIcon('all', 'w-4 h-4')}
               </span>
               <span>All</span>
@@ -530,13 +530,13 @@ const NewOrderPage: React.FC = () => {
                   setSelectedCategory('');
                   setSelectedService(null);
                 }}
-                className={`inline-flex h-[50px] items-center gap-3 rounded-2xl border px-4 text-sm font-semibold transition ${
+                className={`inline-flex h-[40px] items-center gap-3 rounded-2xl border px-4 text-[10px] font-[300]  transition ${
                   selectedPlatform === platform.key
                     ? 'border-brand-purple/60 bg-gradient-to-r from-brand-accent/20 to-brand-purple/20 text-white shadow-purple-glow-sm'
                     : 'border-white/10 bg-white/[0.03] text-gray-200 hover:border-brand-purple/40 hover:bg-white/[0.05]'
                 }`}
               >
-                <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${getPlatformInfo(platform.label).accent}`}>
+                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${getPlatformInfo(platform.label).accent}`}>
                   {renderCategoryIcon(platform.label, 'w-4 h-4')}
                 </span>
                 <span className="whitespace-nowrap">{platform.label}</span>
@@ -548,7 +548,7 @@ const NewOrderPage: React.FC = () => {
         <div ref={searchBoxRef} className="relative mt-3">
           <div className="relative">
             <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-gray-500">
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="11" cy="11" r="7" />
                 <path d="M20 20l-3.5-3.5" />
               </svg>
@@ -608,15 +608,11 @@ const NewOrderPage: React.FC = () => {
               <div>
                 <p className="text-xs uppercase tracking-[0.22em] text-brand-accent font-semibold">Order Placement</p>
                 <h2 className="mt-2 text-xl font-bold text-white">Select service and place order</h2>
-                <p className="mt-2 text-sm text-gray-400">Only the fields needed to create the order are kept here.</p>
               </div>
-              <div className="rounded-xl border border-brand-border bg-black/20 px-4 py-3 text-sm text-gray-300">
-                <p className="text-xs uppercase tracking-[0.18em] text-gray-500">Service Status</p>
-                <p className="mt-1 font-semibold text-white">{selectedService ? 'Selected' : 'Not selected'}</p>
-              </div>
+         
             </div>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-1 gap-4">
                 <div>
                   <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-2">
                     Category
@@ -824,17 +820,6 @@ const NewOrderPage: React.FC = () => {
                     </div>
                   </>
                 )}
-                <hr className="border-brand-border" />
-                <div className="bg-black/30 rounded-lg p-3 border border-brand-border/50">
-                  <p className="text-xs font-semibold text-brand-accent mb-2">Delivery Rate Guide</p>
-                  <ul className="text-xs space-y-1 text-gray-400">
-                    <li>6h: <span className="text-red-400 font-semibold">2.0x</span></li>
-                    <li>12h: <span className="text-orange-400 font-semibold">1.5x</span></li>
-                    <li>24h: <span className="text-green-400 font-semibold">1.0x</span></li>
-                    <li>48h: <span className="text-green-500 font-semibold">0.8x</span></li>
-                    <li>72h: <span className="text-green-600 font-semibold">0.7x</span> (Best)</li>
-                  </ul>
-                </div>
               </div>
             ) : (
               <div className="text-center py-8">

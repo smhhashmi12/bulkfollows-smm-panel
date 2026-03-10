@@ -1,5 +1,6 @@
 import express from 'express';
 import { supabaseAdmin } from '../lib/supabaseServer.js';
+import { readAuthCookies } from '../lib/authCookies.js';
 
 const router = express.Router();
 
@@ -34,10 +35,16 @@ function mapProviderStatusToLocal(statusValue) {
   const rawStatus = String(statusValue || '').toLowerCase();
 
   if (!rawStatus) return 'processing';
+
+  if (rawStatus.includes('pending')) return 'pending';
   if (rawStatus.includes('complete')) return 'completed';
-  if (rawStatus.includes('cancel') || rawStatus.includes('fail') || rawStatus.includes('error')) {
-    return 'failed';
+  if (rawStatus.includes('cancel') || rawStatus.includes('refund')) return 'canceled';
+  if (rawStatus.includes('fail') || rawStatus.includes('error')) return 'failed';
+  if (rawStatus.includes('partial')) return 'processing';
+  if (rawStatus.includes('process') || rawStatus.includes('progress') || rawStatus.includes('inprogress')) {
+    return 'processing';
   }
+
   return 'processing';
 }
 
@@ -81,6 +88,35 @@ async function updateLocalOrder(localOrderId, updates) {
   }
 
   return data;
+}
+
+function getRequestAccessToken(req) {
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  if (typeof authHeader === 'string') {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]) {
+      return String(match[1]).trim();
+    }
+  }
+
+  const cookieTokens = readAuthCookies(req);
+  if (cookieTokens?.accessToken) {
+    return String(cookieTokens.accessToken).trim();
+  }
+
+  return '';
+}
+
+async function getRequestUserId(req) {
+  if (!supabaseAdmin?.auth?.getUser) return null;
+
+  const accessToken = getRequestAccessToken(req);
+  if (!accessToken) return null;
+
+  const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
+  if (error || !data?.user) return null;
+
+  return data.user.id;
 }
 
 /**
@@ -377,6 +413,176 @@ router.get('/order-status', async (req, res) => {
     console.error('[DaoSMM Bridge] Get order status error:', error);
     return res.status(500).json({
       error: 'Failed to fetch order status',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/provider/sync-local-orders
+ * Sync provider statuses into local user orders (bulk)
+ * Body: { order_ids: string[] } or { orderIds: string[] }
+ */
+router.post('/sync-local-orders', async (req, res) => {
+  try {
+    const userId = await getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Missing session token (Authorization or cookie)' });
+    }
+
+    const rawOrderIds = req.body?.order_ids ?? req.body?.orderIds ?? [];
+    const orderIds = (Array.isArray(rawOrderIds) ? rawOrderIds : String(rawOrderIds).split(','))
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+
+    const dedupedOrderIds = Array.from(new Set(orderIds)).slice(0, 50);
+    if (dedupedOrderIds.length === 0) {
+      return res.json({ ok: true, updatedOrders: [] });
+    }
+
+    const { data: localOrders, error: localOrdersError } = await supabaseAdmin
+      .from('orders')
+      .select('id, user_id, provider_id, provider_order_id, status, start_count, remains')
+      .eq('user_id', userId)
+      .in('id', dedupedOrderIds);
+
+    if (localOrdersError) {
+      return res.status(500).json({
+        error: 'Failed to load local orders',
+        message: localOrdersError.message,
+      });
+    }
+
+    const terminalStatuses = new Set(['completed', 'failed', 'canceled']);
+    const syncCandidates = (localOrders || []).filter((order) => {
+      const hasProvider = Boolean(order?.provider_id && order?.provider_order_id);
+      if (!hasProvider) return false;
+      const status = String(order?.status || '').toLowerCase();
+      const needsProgressFields = order?.start_count === null || order?.start_count === undefined ||
+        order?.remains === null || order?.remains === undefined;
+      return !terminalStatuses.has(status) || needsProgressFields;
+    });
+
+    if (syncCandidates.length === 0) {
+      return res.json({ ok: true, updatedOrders: [] });
+    }
+
+    const ordersByProviderId = new Map();
+    syncCandidates.forEach((order) => {
+      const providerId = String(order.provider_id || '').trim();
+      const providerOrderId = String(order.provider_order_id || '').trim();
+      if (!providerId || !providerOrderId) return;
+
+      const entry = ordersByProviderId.get(providerId) || [];
+      entry.push({ ...order, providerOrderId });
+      ordersByProviderId.set(providerId, entry);
+    });
+
+    const providerIds = Array.from(ordersByProviderId.keys());
+    const { data: providers, error: providersError } = await supabaseAdmin
+      .from('providers')
+      .select('id, name, api_key, api_url')
+      .in('id', providerIds);
+
+    if (providersError) {
+      return res.status(500).json({
+        error: 'Failed to load provider credentials',
+        message: providersError.message,
+      });
+    }
+
+    const providerById = new Map((providers || []).map((provider) => [String(provider.id), provider]));
+    const updatedOrders = [];
+
+    for (const providerId of providerIds) {
+      const provider = providerById.get(providerId);
+      if (!provider) continue;
+      if (!provider.api_key) continue;
+
+      const providerOrders = ordersByProviderId.get(providerId) || [];
+      const providerOrderIds = providerOrders.map((order) => String(order.providerOrderId)).filter(Boolean);
+      if (providerOrderIds.length === 0) continue;
+
+      const isSingleOrder = providerOrderIds.length === 1;
+      const orderValue = isSingleOrder ? providerOrderIds[0] : providerOrderIds.join(',');
+      const params = {
+        action: 'status',
+        order: isSingleOrder ? orderValue : undefined,
+        orders: isSingleOrder ? undefined : orderValue,
+      };
+
+      let result;
+      try {
+        result = await callDaoSMM(provider, params);
+      } catch (error) {
+        console.warn('[DaoSMM Bridge] Bulk status sync failed:', {
+          provider: provider?.name,
+          providerId,
+          message: error?.message || String(error),
+        });
+        continue;
+      }
+
+      const providerErrorMessage = extractProviderError(result);
+      if (providerErrorMessage) {
+        console.warn('[DaoSMM Bridge] Provider returned status error:', {
+          provider: provider?.name,
+          providerId,
+          details: providerErrorMessage,
+        });
+        continue;
+      }
+
+      const statusMap = new Map();
+      if (result && typeof result === 'object' && !Array.isArray(result)) {
+        providerOrderIds.forEach((providerOrderId) => {
+          const key = String(providerOrderId).trim();
+          if (key && result[key] !== undefined) {
+            statusMap.set(key, result[key]);
+          }
+        });
+      }
+
+      providerOrders.forEach((order) => {
+        const providerOrderId = String(order.providerOrderId || '').trim();
+        if (!providerOrderId) return;
+        const statusNode = statusMap.get(providerOrderId) ?? (isSingleOrder ? result : null);
+        if (!statusNode) return;
+
+        const rawStatusValue = statusNode?.status || statusNode?.Status || statusNode;
+        const updates = {
+          provider_id: providerId,
+          provider_order_id: providerOrderId,
+          status: mapProviderStatusToLocal(rawStatusValue),
+          start_count:
+            statusNode?.start_count !== undefined && statusNode?.start_count !== null
+              ? Number(statusNode.start_count)
+              : undefined,
+          remains:
+            statusNode?.remains !== undefined && statusNode?.remains !== null
+              ? Number(statusNode.remains)
+              : undefined,
+        };
+
+        updatedOrders.push({ orderId: order.id, updates });
+      });
+    }
+
+    const appliedUpdates = await Promise.all(
+      updatedOrders.map(async (entry) => {
+        const updated = await updateLocalOrder(entry.orderId, entry.updates);
+        return updated || null;
+      })
+    );
+
+    return res.json({
+      ok: true,
+      updatedOrders: appliedUpdates.filter(Boolean),
+    });
+  } catch (error) {
+    console.error('[DaoSMM Bridge] Bulk sync error:', error);
+    return res.status(500).json({
+      error: 'Failed to sync order statuses',
       message: error.message,
     });
   }

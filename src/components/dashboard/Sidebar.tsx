@@ -20,9 +20,11 @@ const Logo: React.FC = () => (
 
 // Fix: Changed JSX.Element to React.ReactNode to resolve namespace error.
 const NavLink: React.FC<{ href: string; icon: React.ReactNode; children: React.ReactNode; active: boolean; onClick?: () => void }> = ({ href, icon, children, active, onClick }) => (
-    <a href={href} onClick={onClick} className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors duration-200 ${active ? 'bg-gradient-to-r from-brand-accent to-brand-purple text-white shadow-purple-glow-sm' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}>
-        {icon}
+    <a href={href} onClick={onClick} className={`flex items-center space-x-3 py-2 rounded-xl  `}>
+        <div className={`w-48 h-10 flex items-center gap-3 px-4 ${active ? 'bg-gradient-to-r from-brand-accent to-brand-purple text-white shadow-purple-glow-sm' : 'text-gray-300 hover:bg-white/10 hover:text-white'} rounded-lg transition-colors duration-200`}>
+            {icon}
         <span className="font-medium">{children}</span>
+        </div>
     </a>
 )
 
@@ -54,7 +56,7 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
 
     return (
         <>
-            <aside className="w-64 ds-sidebar rounded-2xl m-3 p-4 hidden md:flex flex-col">
+            <aside className="w-56 ds-sidebar rounded-2xl m-3 py-4 hidden md:flex flex-col">
                 <div className="py-4 mb-4">
                     <Logo />
                 </div>

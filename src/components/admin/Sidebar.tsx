@@ -18,9 +18,11 @@ const Logo: React.FC = () => (
 
 // Fix: Changed JSX.Element to React.ReactNode to resolve namespace error.
 const NavLink: React.FC<{ href: string; icon: React.ReactNode; children: React.ReactNode; active: boolean; onClick?: () => void }> = ({ href, icon, children, active, onClick }) => (
-    <a href={href} onClick={onClick} className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors duration-200 ${active ? 'bg-gradient-to-r from-brand-accent to-brand-purple text-white shadow-purple-glow-sm' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}>
-        {icon}
+ <a href={href} onClick={onClick} className={`flex items-center space-x-3  rounded-xl  `}>
+        <div className={`w-[13rem] h-10 flex items-center gap-3 px-4 ${active ? 'bg-gradient-to-r from-brand-accent to-brand-purple text-white shadow-purple-glow-sm' : 'text-gray-300 hover:bg-white/10 hover:text-white'} rounded-lg transition-colors duration-200`}>
+            {icon}
         <span className="font-medium">{children}</span>
+        </div>
     </a>
 )
 
@@ -58,10 +60,10 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
 
     return (
         <>
-            <aside className="w-64 ds-sidebar rounded-2xl m-3 p-4 hidden md:flex flex-col">
-                <div className="py-2 mb-4 flex items-center justify-between">
+            <aside className="w-[15rem] ds-sidebar rounded-2xl m-3 py-4 hidden md:flex flex-col">
+                <div className="py-2 mb-4 flex items-center justify-center gap-1">
                     <Logo />
-                    <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-1 rounded-md">ADMIN</span>
+                    <span className="bg-red-500/20 text-red-400 text-xs  px-2 py-1 rounded-md">ADMIN</span>
                 </div>
                 <nav className="flex-1 flex flex-col space-y-2">
                     {navItems.map(item => (
