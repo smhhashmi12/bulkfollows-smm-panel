@@ -19,8 +19,10 @@ const NewOrderPage: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loadingServices, setLoadingServices] = useState(true);
   const [paymentInProgress, setPaymentInProgress] = useState(false);
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const categorySliderRef = useRef<HTMLDivElement | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const categoryPickerRef = useRef<HTMLDivElement | null>(null);
   const { formatAmount } = useCurrency();
 
   // Use the new order management hook
@@ -166,6 +168,48 @@ const NewOrderPage: React.FC = () => {
     if (value.includes('views')) accent = 'from-emerald-500/20 to-teal-500/20 border-emerald-400/30 text-emerald-200';
     return { label: category, icon: renderCategoryIcon(category, 'w-3.5 h-3.5'), accent };
   };
+
+  const getDisplayDescription = (raw: string | null | undefined) => {
+    const text = String(raw || '').trim();
+    if (!text) return '';
+
+    const markerIndex = text.search(/Provider ID:\s*/i);
+    if (markerIndex === 0) {
+      // Metadata-only description from sync: hide it from users.
+      return '';
+    }
+
+    if (markerIndex > 0) {
+      const trimmed = text.slice(0, markerIndex).trim();
+      return trimmed || text;
+    }
+
+    return text;
+  };
+
+  useEffect(() => {
+    if (!categoryDropdownOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (categoryPickerRef.current?.contains(target)) return;
+      setCategoryDropdownOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCategoryDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [categoryDropdownOpen]);
 
   const scrollCategorySlider = (direction: 'left' | 'right') => {
     if (!categorySliderRef.current) return;
@@ -617,25 +661,82 @@ const NewOrderPage: React.FC = () => {
                   <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-2">
                     Category
                   </label>
-                  <select
-                    id="category"
-                    value={selectedCategory}
-                    onChange={(e) => {
-                      const nextCategory = e.target.value;
-                      setSelectedCategory(nextCategory);
-                      setSelectedPlatform(nextCategory ? (getCategoryPlatform(nextCategory) || '') : '');
-                      setSelectedService(null);
-                      setServiceSearch('');
-                    }}
-                    className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white focus:ring-2 focus:ring-brand-purple focus:outline-none cursor-pointer"
-                  >
-                    <option value="">Select a category...</option>
-                    {visibleCategories.map(cat => (
-                      <option key={cat} value={cat}>
-                        {cat.charAt(0).toUpperCase() + cat.slice(1)}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative" ref={categoryPickerRef}>
+                    <button
+                      id="category"
+                      type="button"
+                      aria-haspopup="listbox"
+                      aria-expanded={categoryDropdownOpen}
+                      onClick={() => setCategoryDropdownOpen((prev) => !prev)}
+                      className="w-full bg-brand-input border border-brand-border rounded-lg p-3 text-white focus:ring-2 focus:ring-brand-purple focus:outline-none cursor-pointer flex items-center justify-between gap-3"
+                    >
+                      <span className="min-w-0 flex items-center gap-2">
+                        <span
+                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${getPlatformInfo(selectedCategory || 'Other').accent}`}
+                        >
+                          {getPlatformInfo(selectedCategory || 'Other').icon}
+                        </span>
+                        <span className="truncate">
+                          {selectedCategory || 'Select a category...'}
+                        </span>
+                      </span>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className={`h-4 w-4 shrink-0 text-gray-300 transition-transform ${categoryDropdownOpen ? 'rotate-180' : ''}`}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {categoryDropdownOpen && (
+                      <div
+                        role="listbox"
+                        className="absolute left-0 right-0 z-30 mt-2 max-h-72 overflow-y-auto rounded-2xl border border-brand-border bg-[#120a25] shadow-xl ds-scrollbar"
+                      >
+                        {visibleCategories.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-gray-400">
+                            No categories found.
+                          </div>
+                        ) : (
+                          visibleCategories.map((cat) => {
+                            const platform = getPlatformInfo(cat);
+                            const selected = cat === selectedCategory;
+                            return (
+                              <button
+                                key={cat}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                onClick={() => {
+                                  setSelectedCategory(cat);
+                                  setSelectedPlatform(cat ? (getCategoryPlatform(cat) || '') : '');
+                                  setSelectedService(null);
+                                  setServiceSearch('');
+                                  setCategoryDropdownOpen(false);
+                                }}
+                                className={`w-full border-b border-brand-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-white/5 flex items-center gap-3 ${
+                                  selected ? 'bg-white/5' : ''
+                                }`}
+                              >
+                                <span
+                                  className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${platform.accent}`}
+                                >
+                                  {platform.icon}
+                                </span>
+                                <span className="min-w-0 truncate text-sm font-medium text-white">
+                                  {cat}
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -816,7 +917,9 @@ const NewOrderPage: React.FC = () => {
                     <hr className="border-brand-border" />
                     <div>
                       <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Description</p>
-                      <p>{selectedService.description}</p>
+                      <div className="whitespace-pre-wrap break-words leading-relaxed text-gray-300">
+                        {getDisplayDescription(selectedService.description)}
+                      </div>
                     </div>
                   </>
                 )}

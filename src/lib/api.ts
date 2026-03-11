@@ -336,20 +336,35 @@ export const authAPI = {
 // Services Functions
 export const servicesAPI = {
   async getServices(category?: string) {
-    let query = supabase
-      .from('services')
-      .select('*')
-      .eq('status', 'active')
-      .order('category', { ascending: true })
-      .order('name', { ascending: true });
+    const PAGE_SIZE = 1000;
+    const MAX_ROWS = 50000;
 
-    if (category) {
-      query = query.eq('category', category);
+    const rows: Service[] = [];
+    for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+      let query = supabase
+        .from('services')
+        .select('*')
+        .eq('status', 'active')
+        .order('category', { ascending: true })
+        .order('name', { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+
+      if (category) {
+        query = query.eq('category', category);
+      }
+
+      const { data, error } = await runSupabaseQuery(query, `services list page ${offset / PAGE_SIZE + 1}`);
+      if (error) throw error;
+
+      const page = (data || []) as Service[];
+      rows.push(...page);
+
+      if (page.length < PAGE_SIZE) {
+        break;
+      }
     }
 
-    const { data, error } = await runSupabaseQuery(query, 'services list');
-    if (error) throw error;
-    return data as Service[];
+    return rows;
   },
 
   async getService(id: string) {
@@ -402,19 +417,8 @@ export const servicesAPI = {
         }
         if (!providerInfo) return service;
 
-        const detailParts = [
-          service.description || '',
-          `Provider ID: ${providerInfo.provider_id}`,
-          `Provider Service ID: ${providerInfo.provider_service_id}`,
-          `Provider Rate: ${providerInfo.provider_rate}`,
-          `Our Rate: ${providerInfo.our_rate}`,
-          `Min: ${providerInfo.min_quantity ?? service.min_quantity}`,
-          `Max: ${providerInfo.max_quantity ?? service.max_quantity}`,
-        ].filter(Boolean);
-
         return {
           ...service,
-          description: detailParts.join(' | '),
           rate_per_1000: Number(providerInfo.our_rate ?? service.rate_per_1000),
           min_quantity: Number(providerInfo.min_quantity ?? service.min_quantity),
           max_quantity: Number(providerInfo.max_quantity ?? service.max_quantity),
@@ -715,16 +719,30 @@ export const adminAPI = {
 
   // Service Management
   async getAllServices() {
-    const { data, error } = await runSupabaseQuery(
-      supabase
-        .from('services')
-        .select('*')
-        .order('category', { ascending: true })
-        .order('name', { ascending: true }),
-      'admin services list'
-    );
-    if (error) throw error;
-    return data as Service[];
+    const PAGE_SIZE = 1000;
+    const MAX_ROWS = 50000;
+
+    const rows: Service[] = [];
+
+    for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+      const { data, error } = await runSupabaseQuery(
+        supabase
+          .from('services')
+          .select('*')
+          .order('category', { ascending: true })
+          .order('name', { ascending: true })
+          .order('id', { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1),
+        `admin services list (page ${Math.floor(offset / PAGE_SIZE) + 1})`
+      );
+      if (error) throw error;
+
+      const page = (data || []) as Service[];
+      rows.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
+
+    return rows;
   },
 
   async createService(service: Omit<Service, 'id' | 'created_at' | 'updated_at'>) {
@@ -776,6 +794,44 @@ export const adminAPI = {
     );
     if (error) throw error;
     return data;
+  },
+
+  async createProvider(provider: any) {
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .insert(provider)
+        .select()
+        .single(),
+      'admin provider create'
+    );
+    if (error) throw error;
+    return data;
+  },
+
+  async updateProvider(providerId: string, updates: any) {
+    const { data, error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .update(updates)
+        .eq('id', providerId)
+        .select()
+        .single(),
+      'admin provider update'
+    );
+    if (error) throw error;
+    return data;
+  },
+
+  async deleteProvider(providerId: string) {
+    const { error } = await runSupabaseQuery(
+      supabase
+        .from('providers')
+        .delete()
+        .eq('id', providerId),
+      'admin provider delete'
+    );
+    if (error) throw error;
   },
 
   async createProvider(provider: any) {

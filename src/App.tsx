@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase';
 import { authAPI } from './lib/api';
 import { CurrencyProvider } from './lib/CurrencyContext';
 import { NotificationProvider } from './lib/NotificationContext';
+import { QueryClientProvider } from './lib/QueryClientProvider';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
@@ -469,7 +470,7 @@ const App: React.FC = () => {
     deferredUiReady && !['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   return (
-    <>
+    <QueryClientProvider>
       <NotificationProvider>
         <CurrencyProvider>
           <Suspense fallback={<AppLoadingScreen />}>
@@ -483,7 +484,7 @@ const App: React.FC = () => {
           <Analytics />
         </Suspense>
       ) : null}
-    </>
+    </QueryClientProvider>
   );
 };
 

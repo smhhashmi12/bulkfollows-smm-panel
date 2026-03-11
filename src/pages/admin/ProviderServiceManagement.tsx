@@ -183,7 +183,13 @@ const ProviderServiceManagementPage: React.FC = () => {
         throw new Error(result?.message || 'Failed to sync provider services');
       }
 
-      setMessage(`Synced ${result.synced_count || result.count || 0} services successfully.`);
+      const synced = result.synced_count || result.count || 0;
+      const skipped = result.skipped_services || 0;
+      setMessage(
+        skipped > 0
+          ? `Synced ${synced} services successfully (skipped ${skipped} invalid rows).`
+          : `Synced ${synced} services successfully.`
+      );
       await loadProviderServices();
     } catch (err: any) {
       setError(err.message || 'Failed to sync provider services');

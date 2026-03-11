@@ -204,7 +204,13 @@ const ProviderManagementPage: React.FC = () => {
 
       setError(null);
       await fetchProviders();
-      alert(`Synced ${result.synced_count || result.count || 0} services from ${provider.name}`);
+      const synced = result.synced_count || result.count || 0;
+      const skipped = result.skipped_services || 0;
+      alert(
+        skipped > 0
+          ? `Synced ${synced} services from ${provider.name} (skipped ${skipped} invalid rows).`
+          : `Synced ${synced} services from ${provider.name}`
+      );
     } catch (err: any) {
       setError(`Sync error: ${err.message || 'Sync timeout'}`);
       console.error('Sync services error:', err);
