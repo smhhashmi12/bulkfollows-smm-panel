@@ -114,25 +114,18 @@ const App: React.FC = () => {
     writeCachedUser(user);
   };
 
-  const restoreCachedUser = (sessionUserId?: string) => {
+  const restoreCachedUser = (sessionUserId?: string): User | null => {
     const cachedUser = readCachedUser();
-
-    if (!cachedUser) {
-      return null;
-    }
-
-    if (sessionUserId && cachedUser.id && cachedUser.id !== sessionUserId) {
+    
+    if (!cachedUser) return null;
+    
+    // Single validation logic - eliminate duplicate checks
+    if (sessionUserId && cachedUser.id !== sessionUserId) {
       writeCachedUser(null);
-      if (currentUserRef.current?.id === cachedUser.id) {
-        persistCurrentUser(null);
-      }
+      persistCurrentUser(null);  // Use persistCurrentUser instead of ref check
       return null;
     }
-
-    if (cachedUser.id && sessionUserId && cachedUser.id !== sessionUserId) {
-      return null;
-    }
-
+    
     persistCurrentUser(cachedUser);
     return cachedUser;
   };
