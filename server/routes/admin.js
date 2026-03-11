@@ -1,4 +1,5 @@
 import express from 'express';
+import { z } from 'zod';
 import {
   supabase,
   supabaseAdmin,
@@ -7,7 +8,7 @@ import {
 } from '../lib/supabaseServer.js';
 import { AUTH_COOKIE_NAMES } from '../lib/authCookies.js';
 import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse.js';
-import { validateRequest, validateQuery, schemas } from '../lib/validation.js';
+import { validateRequest, validateQuery, validateParams, schemas } from '../lib/validation.js';
 
 const router = express.Router();
 const MAX_DECIMAL_10_2 = 99999999.99;
@@ -731,26 +732,26 @@ router.get(
 });
 
 // PATCH /api/admin/provider-services/:id - update provider mapping fields
-router.patch('/provider-services/:id', asyncHandler(async (req, res) => {
-  try {
-    if (!supabaseAdminConfigured || !supabaseAdmin) {
-      return res.status(503).json({
-        success: false,
-        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
-      });
-    }
+router.patch(
+  '/provider-services/:id',
+  validateParams(z.object({ id: z.string().uuid('Invalid provider-service ID') })),
+  asyncHandler(async (req, res) => {
+    try {
+      if (!supabaseAdminConfigured || !supabaseAdmin) {
+        return res.status(503).json(errorResponse('NO_SERVICE_KEY', 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.'));
+      }
 
-    const { id } = req.params;
-    const {
-      provider_rate,
-      our_rate,
-      min_quantity,
-      max_quantity,
-      status,
-      service_name,
-      service_category,
-      service_status,
-    } = req.body || {};
+      const { id } = req.params;
+      const {
+        provider_rate,
+        our_rate,
+        min_quantity,
+        max_quantity,
+        status,
+        service_name,
+        service_category,
+        service_status,
+      } = req.body || {};
 
     const mappingUpdates = {};
     if (provider_rate !== undefined) mappingUpdates.provider_rate = toNumber(provider_rate, 0);
@@ -770,15 +771,9 @@ router.patch('/provider-services/:id', asyncHandler(async (req, res) => {
     if (mappingError || !updatedMapping) {
       if (mappingError) {
         const serverError = getSupabaseServerError(mappingError, 'Failed to update provider mapping');
-        return res.status(serverError.status).json({
-          success: false,
-          message: serverError.message,
-        });
+        return res.status(serverError.status).json(errorResponse('UPDATE_MAPPING_FAILED', serverError.message));
       }
-      return res.status(500).json({
-        success: false,
-        message: mappingError?.message || 'Failed to update provider mapping',
-      });
+      return res.status(500).json(errorResponse('UPDATE_MAPPING_FAILED', mappingError?.message || 'Failed to update provider mapping'));
     }
 
     if (
@@ -805,18 +800,15 @@ router.patch('/provider-services/:id', asyncHandler(async (req, res) => {
 
       if (serviceError) {
         const serverError = getSupabaseServerError(serviceError, 'Mapping updated but service update failed');
-        return res.status(serverError.status).json({
-          success: false,
-          message: serverError.message,
-        });
+        return res.status(serverError.status).json(errorResponse('SERVICE_UPDATE_FAILED', serverError.message));
       }
     }
 
-    return res.status(200).json({ success: true, message: 'Provider service updated successfully' });
+    return res.json(successResponse({ message: 'Provider service updated successfully' }));
   } catch (error) {
     console.error('[provider-services] update error:', error);
     const serverError = getSupabaseServerError(error);
-    return res.status(serverError.status).json({ success: false, message: serverError.message });
+    return res.status(serverError.status).json(errorResponse('UNEXPECTED_UPDATE_ERROR', serverError.message));
   }
 });
 
@@ -848,14 +840,14 @@ router.get('/settings', asyncHandler(async (req, res) => {
     });
   } catch (error) {
     console.error('[settings] get error:', error);
-    return res.status(500).json({ error: error.message || 'Internal server error' });
+    return res.status(500).json(errorResponse('SETTINGS_FETCH_ERROR', error.message || 'Internal server error'));
   }
 });
 
 router.post('/settings', asyncHandler(async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
-      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+      return res.status(503).json(errorResponse('NO_SERVICE_KEY', 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.'));
     }
 
     const payload = {
@@ -875,21 +867,15 @@ router.post('/settings', asyncHandler(async (req, res) => {
       const code = String(error.code || '');
       const missingTable = code === '42P01' || message.includes('app_settings');
       if (missingTable) {
-        return res.status(400).json({
-          error: 'Settings table is missing. Create public.app_settings before saving.',
-          tableMissing: true,
-        });
+        return res.status(400).json(errorResponse('SETTINGS_TABLE_MISSING', 'Settings table is missing. Create public.app_settings before saving.', { tableMissing: true }));
       }
-      return res.status(500).json({ error: error.message || 'Failed to save settings' });
+      return res.status(500).json(errorResponse('SETTINGS_SAVE_FAILED', error.message || 'Failed to save settings'));
     }
 
-    return res.status(200).json({
-      settings: data?.config || {},
-      tableMissing: false,
-    });
+    return res.json(successResponse({ settings: data?.config || {}, tableMissing: false }));
   } catch (error) {
     console.error('[settings] save error:', error);
-    return res.status(500).json({ error: error.message || 'Internal server error' });
+    return res.status(500).json(errorResponse('SETTINGS_SAVE_ERROR', error.message || 'Internal server error'));
   }
 });
 
