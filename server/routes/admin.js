@@ -6,6 +6,8 @@ import {
   supabaseAdminConfigured,
 } from '../lib/supabaseServer.js';
 import { AUTH_COOKIE_NAMES } from '../lib/authCookies.js';
+import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse.js';
+import { validateRequest, validateQuery, schemas } from '../lib/validation.js';
 
 const router = express.Router();
 const MAX_DECIMAL_10_2 = 99999999.99;
@@ -69,15 +71,17 @@ const getSupabaseServerError = (error, fallbackMessage = 'Internal server error'
 
 // GET /api/admin/me - returns the user_profiles entry for the current session user
 // This endpoint accepts either a Bearer token (Authorization header) or a browser session cookie.
-router.get('/me', async (req, res) => {
-  try {
+router.get(
+  '/me',
+  asyncHandler(async (req, res) => {
     if (!supabaseConfigured || !supabase) {
-      return res.status(503).json({ error: 'Supabase not configured' });
+      return res.status(503).json(errorResponse('Supabase not configured'));
     }
     // Restrict debug endpoint in production unless explicitly allowed
     if (process.env.NODE_ENV === 'production' && process.env.ALLOW_ADMIN_DEBUG !== '1') {
-      return res.status(403).json({ error: 'Admin debug endpoint disabled in production' });
+      return res.status(403).json(errorResponse('Admin debug endpoint disabled in production'));
     }
+
     // First try Authorization header (Bearer token)
     const authHeader = req.headers['authorization'] || req.headers['Authorization'];
     let token = null;
@@ -86,11 +90,11 @@ router.get('/me', async (req, res) => {
       if (parts.length === 2 && parts[0] === 'Bearer') token = parts[1];
     }
 
-    // Fallback: attempt to parse the cookie header for an access token or a session JSON object
+    // Fallback: attempt to parse cookies for a session
     if (!token) {
       const cookieHeader = req.headers['cookie'] || req.headers['Cookie'] || '';
       const cookies = {};
-      cookieHeader.split(';').forEach(c => {
+      cookieHeader.split(';').forEach((c) => {
         const idx = c.indexOf('=');
         if (idx > -1) {
           const key = c.slice(0, idx).trim();
@@ -99,7 +103,6 @@ router.get('/me', async (req, res) => {
         }
       });
 
-      // Common Supabase cookie and localStorage keys to check for a session
       const possibleKeys = [
         AUTH_COOKIE_NAMES.accessToken,
         'sb:token',
@@ -116,7 +119,6 @@ router.get('/me', async (req, res) => {
       for (const k of possibleKeys) {
         if (cookies[k]) {
           const val = cookies[k];
-          // If value looks like JSON, parse it and try to extract access_token
           if (val.startsWith('{') || val.startsWith('%7B')) {
             try {
               const parsed = JSON.parse(decodeURIComponent(val));
@@ -124,17 +126,14 @@ router.get('/me', async (req, res) => {
                 token = parsed.access_token;
                 break;
               }
-              // Some sessions store nested session objects
               if (parsed && parsed.currentSession && parsed.currentSession.access_token) {
                 token = parsed.currentSession.access_token;
                 break;
               }
             } catch (e) {
-              // ignore parse errors
+              // ignore
             }
           }
-
-          // If it doesn't look like JSON, assume it's the token directly
           if (!token && val && val.length > 20) {
             token = val;
             break;
@@ -144,16 +143,13 @@ router.get('/me', async (req, res) => {
     }
 
     if (!token) {
-      return res.status(401).json({ error: 'Missing session token (Authorization or cookie)' });
+      return res.status(401).json(errorResponse('Missing session token (Authorization or cookie)'));
     }
 
-    // Create an auth client using the token to fetch the current user's id
-    const client = supabase.auth; // we will use admin client and rely on jwt decode if needed
-    // Using admin client, decode token to determine user id
-    // NOTE: This is a best-effort helper for debugging; in production, you'd use standard session middleware and verify JWT.
-    // Use token to fetch the user via Supabase Admin API call (server-side)
     const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userData || !userData.user) return res.status(401).json({ error: 'Invalid token or unable to fetch user from token' });
+    if (userErr || !userData || !userData.user) {
+      return res.status(401).json(errorResponse('Invalid token or unable to fetch user from token'));
+    }
     const userId = userData.user.id;
 
     const { data: profile, error: profileError } = await supabase
@@ -161,29 +157,28 @@ router.get('/me', async (req, res) => {
       .select('id, username, email, role, balance')
       .eq('id', userId)
       .single();
-    if (profileError) return res.status(500).json({ error: profileError.message || profileError });
-    return res.json({ profile });
-  } catch (err) {
-    console.error('Admin me route error', err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
+    if (profileError) {
+      return res.status(500).json(errorResponse('PROFILE_FETCH_FAILED', profileError.message || profileError));
+    }
+    return res.json(successResponse({ profile }));
+  })
+);
 
 // POST /api/admin/test-provider - Test provider API connection (DaoSMM Format)
-router.post('/test-provider', async (req, res) => {
-  console.log('[test-provider] Request received:', req.body);
-  
-  try {
-    const { api_url, api_key, api_secret } = req.body;
+router.post(
+  '/test-provider',
+  validateRequest(schemas.testProviderSchema),
+  asyncHandler(async (req, res) => {
+    console.log('[test-provider] Request received:', req.body);
+    
+    try {
+      const { api_url, api_key, api_secret } = req.validatedBody || req.body;
 
-    // Validate required fields
-    if (!api_url || !api_key) {
-      console.log('[test-provider] Missing fields');
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: api_url, api_key'
-      });
-    }
+      // manual fallback validation (schema should catch missing fields)
+      if (!api_url || !api_key) {
+        console.log('[test-provider] Missing fields');
+        return res.status(400).json(errorResponse('MISSING_FIELDS', 'Missing required fields: api_url, api_key'));
+      }
 
     console.log('[test-provider] Building test URL:', api_url);
 
@@ -230,12 +225,11 @@ router.post('/test-provider', async (req, res) => {
         console.log('[test-provider] Response not OK');
         const errorText = await response.text();
         console.log('[test-provider] Error response:', errorText);
-        return res.status(200).json({
-          success: false,
-          message: `Provider API returned status ${response.status}`,
-          balance: 0,
-          raw_error: errorText
-        });
+        return res.status(200).json(errorResponse(
+          'PROVIDER_API_ERROR',
+          `Provider API returned status ${response.status}`,
+          { balance: 0, raw_error: errorText }
+        ));
       }
 
       const data = await response.json();
@@ -253,62 +247,54 @@ router.post('/test-provider', async (req, res) => {
 
       console.log('[test-provider] Extracted balance:', balance);
 
-      return res.status(200).json({
-        success: true,
+      return res.json(successResponse({
         balance: isNaN(balance) ? 0 : balance,
         status: 'active',
         message: 'Connection successful',
         raw_response: data
-      });
+      }));
     } catch (fetchError) {
       clearTimeout(timeoutId);
       
       console.log('[test-provider] Fetch error:', fetchError.name, fetchError.message);
 
       if (fetchError.name === 'AbortError') {
-        return res.status(200).json({
-          success: false,
-          message: 'Provider API connection timeout (8s)',
-          balance: 0
-        });
+        return res.status(200).json(errorResponse(
+          'PROVIDER_TIMEOUT',
+          'Provider API connection timeout (8s)',
+          { balance: 0 }
+        ));
       }
 
-      return res.status(200).json({
-        success: false,
-        message: fetchError.message || 'Failed to connect to provider API',
-        balance: 0
-      });
+      return res.status(200).json(errorResponse(
+        'PROVIDER_FETCH_FAILED',
+        fetchError.message || 'Failed to connect to provider API',
+        { balance: 0 }
+      ));
     }
   } catch (error) {
     console.error('[test-provider] Outer catch error:', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Internal server error',
-      balance: 0
-    });
+    return res.status(500).json(errorResponse('INTERNAL_ERROR', error.message || 'Internal server error', { balance: 0 }));
   }
 });
 
 // POST /api/admin/sync-provider-services - Sync services from provider
-router.post('/sync-provider-services', async (req, res) => {
-  console.log('[sync-services] Request received:', req.body);
+router.post(
+  '/sync-provider-services',
+  validateRequest(schemas.syncProviderServicesSchema),
+  asyncHandler(async (req, res) => {
+    console.log('[sync-services] Request received:', req.validatedBody || req.body);
   
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
-      return res.status(503).json({
-        success: false,
-        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
-      });
+      return res.status(503).json(errorResponse('NO_SERVICE_KEY', 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.'));
     }
 
-    const { provider_id, markup_percent } = req.body;
+    const { provider_id, markup_percent } = req.validatedBody || req.body;
     const markupPercent = toNumber(markup_percent, 0);
 
     if (!provider_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing provider_id'
-      });
+      return res.status(400).json(errorResponse('MISSING_PROVIDER', 'Missing provider_id'));
     }
 
     // Get provider details
@@ -321,15 +307,9 @@ router.post('/sync-provider-services', async (req, res) => {
     if (providerError || !provider) {
       if (providerError) {
         const serverError = getSupabaseServerError(providerError, 'Provider lookup failed');
-        return res.status(serverError.status).json({
-          success: false,
-          message: serverError.message,
-        });
+        return res.status(serverError.status).json(errorResponse('PROVIDER_LOOKUP_FAILED', serverError.message));
       }
-      return res.status(404).json({
-        success: false,
-        message: 'Provider not found'
-      });
+      return res.status(404).json(errorResponse('PROVIDER_NOT_FOUND', 'Provider not found'));
     }
 
     console.log('[sync-services] Provider found:', provider.id);
@@ -339,10 +319,7 @@ router.post('/sync-provider-services', async (req, res) => {
     try {
       servicesUrl = new URL(provider.api_url);
     } catch (e) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid provider API URL'
-      });
+      return res.status(400).json(errorResponse('INVALID_PROVIDER_URL', 'Invalid provider API URL'));
     }
 
     servicesUrl.searchParams.append('action', 'services');
@@ -605,16 +582,16 @@ router.post('/sync-provider-services', async (req, res) => {
 });
 
 // GET /api/admin/provider-services - list provider services with provider + system service details
-router.get('/provider-services', async (req, res) => {
+router.get(
+  '/provider-services',
+  validateQuery(schemas.providerServicesQuerySchema),
+  asyncHandler(async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
-      return res.status(503).json({
-        success: false,
-        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
-      });
+      return res.status(503).json(errorResponse('NO_SERVICE_KEY', 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.'));
     }
 
-    const { provider_id, category, status } = req.query;
+    const { provider_id, category, status } = req.validatedQuery || req.query;
 
     // Auto-repair old mappings that were saved without service_id
     const orphanQuery = supabaseAdmin
@@ -684,7 +661,7 @@ router.get('/provider-services', async (req, res) => {
     if (error) {
       console.error('[provider-services] list error:', error);
       const serverError = getSupabaseServerError(error, 'Failed to load provider services');
-      return res.status(serverError.status).json({ success: false, message: serverError.message });
+      return res.status(serverError.status).json(errorResponse('LOAD_PROVIDER_SERVICES_FAILED', serverError.message));
     }
 
     const normalizedRows = (data || []).map((row) => ({
@@ -745,16 +722,16 @@ router.get('/provider-services', async (req, res) => {
       ? mergedRows.filter((row) => row?.services?.category === category)
       : mergedRows;
 
-    return res.status(200).json({ success: true, services: filtered });
+    return res.json(successResponse({ services: filtered }));
   } catch (error) {
     console.error('[provider-services] unexpected error:', error);
     const serverError = getSupabaseServerError(error);
-    return res.status(serverError.status).json({ success: false, message: serverError.message });
+    return res.status(serverError.status).json(errorResponse('UNEXPECTED_PROVIDER_SERVICES_ERROR', serverError.message));
   }
 });
 
 // PATCH /api/admin/provider-services/:id - update provider mapping fields
-router.patch('/provider-services/:id', async (req, res) => {
+router.patch('/provider-services/:id', asyncHandler(async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({
@@ -843,7 +820,7 @@ router.patch('/provider-services/:id', async (req, res) => {
   }
 });
 
-router.get('/settings', async (req, res) => {
+router.get('/settings', asyncHandler(async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
@@ -875,7 +852,7 @@ router.get('/settings', async (req, res) => {
   }
 });
 
-router.post('/settings', async (req, res) => {
+router.post('/settings', asyncHandler(async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
       return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });

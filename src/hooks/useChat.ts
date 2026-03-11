@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { chatAPI, ChatChannel, ChatMessage, ChatPlatformId } from '../lib/chat';
-import { chatPlatforms } from '../components/chat/chatConfig';
+import { chatAPI, ChatChannel, ChatMessage } from '../lib/chat';
+import { chatPlatforms, ChatPlatformId } from '../components/chat/chatConfig';
 
 /**
  * useChat Hook
@@ -56,7 +56,7 @@ export const useChat = (userId: string | null) => {
     setError(null);
     try {
       const data = await chatAPI.getChannelMessages(activeChannel.id);
-      setMessages(data.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
+      setMessages(data.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load messages');
       console.error('[Chat] Failed to load messages:', err);
@@ -67,11 +67,16 @@ export const useChat = (userId: string | null) => {
 
   // Send message
   const sendMessage = useCallback(async (text: string) => {
-    if (!activeChannel?.id || !text.trim()) return;
+    if (!activeChannel?.id || !activeChannel?.user_id || !text.trim()) return;
     setSending(true);
     setError(null);
     try {
-      await chatAPI.sendMessage(activeChannel.id, text);
+      await chatAPI.sendMessage({
+        channelId: activeChannel.id,
+        senderId: activeChannel.user_id,
+        senderRole: 'user',
+        body: text,
+      });
       setDraft('');
       await loadMessages();  // Refresh messages
     } catch (err) {
@@ -80,7 +85,7 @@ export const useChat = (userId: string | null) => {
     } finally {
       setSending(false);
     }
-  }, [activeChannel?.id, loadMessages]);
+  }, [activeChannel?.id, activeChannel?.user_id, loadMessages]);
 
   // Load channels on mount
   useEffect(() => {

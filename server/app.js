@@ -112,7 +112,12 @@ async function registerRoutes() {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/provider', providerRouter);
 
+  // health check
   app.get('/', (_req, res) => res.send('BulkFollows backend running'));
+
+  // global error handler (should be last middleware)
+  const { errorHandler } = await import('./lib/apiResponse.js');
+  app.use(errorHandler);
 
   return app;
 }

@@ -1,6 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { supabaseAdmin, supabaseAdminConfigured } from '../lib/supabaseServer.js';
+import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse.js';
 
 const router = express.Router();
 
@@ -37,8 +38,9 @@ async function findPaymentRecord(paymentId, fastpayOrderId, transactionId) {
 }
 
 // FastPay webhook receiver
-router.post('/', async (req, res) => {
-  try {
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
     const payload = req.body || {};
     const signature = req.headers['x-fastpay-signature'] || req.headers['x-signature'];
     const secret = process.env.FASTPAY_WEBHOOK_SECRET;
@@ -48,7 +50,7 @@ router.post('/', async (req, res) => {
       const computed = crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
       if (computed !== signature) {
         console.warn('Invalid FastPay webhook signature', { computed, signature });
-        return res.status(400).json({ error: 'Invalid signature' });
+        return res.status(400).json(errorResponse('INVALID_SIGNATURE', 'Invalid signature'));
       }
     }
 
@@ -62,7 +64,7 @@ router.post('/', async (req, res) => {
     // If Supabase isn't configured, skip DB work but accept the webhook so payment provider won't retry
     if (!supabaseAdminConfigured || !supabaseAdmin) {
       console.warn('Received webhook but Supabase not configured; skipping DB insert.');
-      return res.json({ ok: true, note: 'Supabase not configured; webhook accepted but not processed.' });
+      return res.json(successResponse({ note: 'Supabase not configured; webhook accepted but not processed.' }));
     }
 
     const paymentRecord = await findPaymentRecord(paymentId, fastpayOrderId, providerTxnId);
@@ -72,7 +74,7 @@ router.post('/', async (req, res) => {
         fastpayOrderId,
         providerTxnId,
       });
-      return res.json({ ok: true, note: 'No matching payment record found.' });
+      return res.json(successResponse({ note: 'No matching payment record found.' }));
     }
 
     const mergedMetadata = {
@@ -94,7 +96,7 @@ router.post('/', async (req, res) => {
 
     if (paymentError) {
       console.error('Error updating payment record from webhook', paymentError);
-      return res.status(500).json({ error: 'Failed to update payment record' });
+      return res.status(500).json(errorResponse('UPDATE_FAILED', 'Failed to update payment record'));
     }
 
     if (status === 'completed' && paymentRecord.status !== 'completed') {
@@ -120,11 +122,8 @@ router.post('/', async (req, res) => {
     }
 
     // FastPay expects a 200-ish response for success
-    return res.json({ ok: true, paymentId: updatedPayment.id, status });
-  } catch (err) {
-    console.error('Webhook handler error', err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
+    return res.json(successResponse({ paymentId: updatedPayment.id, status }));
+  })
+);
 
 export default router;

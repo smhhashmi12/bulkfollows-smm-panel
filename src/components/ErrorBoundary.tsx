@@ -23,11 +23,14 @@ interface State {
  * </ErrorBoundary>
  */
 export class ErrorBoundary extends React.Component<Props, State> {
-  state: State = {
-    hasError: false,
-    error: undefined,
-    errorInfo: undefined,
-  };
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: undefined,
+      errorInfo: undefined,
+    };
+  }
 
   static getDerivedStateFromError(error: Error): State {
     return {

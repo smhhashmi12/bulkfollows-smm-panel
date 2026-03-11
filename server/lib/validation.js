@@ -19,6 +19,22 @@ export const schemas = {
     username: z.string().min(3, 'Username must be at least 3 characters').max(30, 'Username too long'),
   }),
 
+  // Additional admin schemas
+  testProviderSchema: z.object({
+    api_url: z.string().url('Invalid API URL'),
+    api_key: z.string().min(1, 'API key is required'),
+    api_secret: z.string().optional(),
+  }),
+  syncProviderServicesSchema: z.object({
+    provider_id: z.string().uuid('Invalid provider ID'),
+    markup_percent: z.number().nonnegative('Markup percent must be nonnegative'),
+  }),
+  providerServicesQuerySchema: z.object({
+    provider_id: z.string().uuid('Invalid provider_id').optional(),
+    category: z.string().optional(),
+    status: z.string().optional(),
+  }),
+
   // Provider schemas
   updateProviderSchema: z.object({
     providerId: z.string().uuid('Invalid provider ID format'),
@@ -40,6 +56,25 @@ export const schemas = {
     rate_per_1000: z.number().positive('Rate must be positive').optional(),
     min_quantity: z.number().nonnegative('Min quantity cannot be negative').optional(),
     max_quantity: z.number().positive('Max quantity must be positive').optional(),
+  }),
+
+  // Provider-related request bodies
+  providerAddOrderSchema: z.object({
+    provider_id: z.string().uuid('Invalid provider ID'),
+    local_order_id: z.string().uuid().optional(),
+    service: z.string().min(1, 'Service identifier is required'),
+    link: z.string().url('Invalid link URL'),
+    quantity: z.union([z.string(), z.number()]).refine(val => !isNaN(Number(val)), 'Quantity must be numeric'),
+    runs: z.union([z.string(), z.number()]).optional(),
+    interval: z.union([z.string(), z.number()]).optional(),
+  }),
+
+  // Query parameter schemas
+  providerServiceLinkQuery: z.object({
+    service_id: z.string().uuid('Invalid service_id')
+  }),
+  providerIdQuery: z.object({
+    provider_id: z.string().uuid('Invalid provider_id')
   }),
 };
 

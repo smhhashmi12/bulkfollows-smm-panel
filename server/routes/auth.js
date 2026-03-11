@@ -11,6 +11,7 @@ import {
   readAuthCookies,
   setAuthCookies,
 } from '../lib/authCookies.js';
+import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse.js';
 
 const router = express.Router();
 
@@ -26,108 +27,81 @@ const getAuthClient = () => {
   return null;
 };
 
-router.post('/session', async (req, res) => {
-  try {
-    const accessToken = String(req.body?.accessToken || '').trim();
-    const refreshToken = String(req.body?.refreshToken || '').trim();
-    const expiresAt = Number.parseInt(String(req.body?.expiresAt || ''), 10);
-    const expiresIn = Number.parseInt(String(req.body?.expiresIn || ''), 10);
+router.post('/session', asyncHandler(async (req, res) => {
+  const accessToken = String(req.body?.accessToken || '').trim();
+  const refreshToken = String(req.body?.refreshToken || '').trim();
+  const expiresAt = Number.parseInt(String(req.body?.expiresAt || ''), 10);
+  const expiresIn = Number.parseInt(String(req.body?.expiresIn || ''), 10);
 
-    if (!accessToken || !refreshToken) {
-      clearAuthCookies(res);
-      return res.status(400).json({
-        error: 'Missing accessToken or refreshToken',
-        cookieConfig: getAuthCookieConfig(),
-      });
-    }
-
-    const authClient = getAuthClient();
-    if (authClient) {
-      const { data, error } = await authClient.auth.getUser(accessToken);
-      if (error || !data?.user) {
-        clearAuthCookies(res);
-        return res.status(401).json({
-          error: 'Invalid access token',
-          cookieConfig: getAuthCookieConfig(),
-        });
-      }
-    }
-
-    setAuthCookies(res, {
-      accessToken,
-      refreshToken,
-      expiresAt: Number.isFinite(expiresAt) ? expiresAt : undefined,
-      expiresIn: Number.isFinite(expiresIn) ? expiresIn : undefined,
-    });
-
-    return res.status(200).json({
-      success: true,
-      cookieConfig: getAuthCookieConfig(),
-    });
-  } catch (error) {
-    console.error('[auth] failed to persist session cookies:', error);
+  if (!accessToken || !refreshToken) {
     clearAuthCookies(res);
-    return res.status(500).json({
-      error: 'Failed to persist session cookies',
-      cookieConfig: getAuthCookieConfig(),
-    });
+    return res.status(400).json(
+      errorResponse('MISSING_TOKENS', 'Missing accessToken or refreshToken', { cookieConfig: getAuthCookieConfig() })
+    );
   }
-});
 
-router.post('/clear', (_req, res) => {
-  clearAuthCookies(res);
-  return res.status(200).json({
-    success: true,
-    cookieConfig: getAuthCookieConfig(),
-  });
-});
-
-router.get('/session', async (req, res) => {
-  try {
-    const { accessToken, refreshToken, expiresAt } = readAuthCookies(req);
-
-    if (!accessToken || !refreshToken) {
-      return res.status(200).json({
-        sessionPresent: false,
-        cookieConfig: getAuthCookieConfig(),
-      });
-    }
-
-    const authClient = getAuthClient();
-    if (!authClient) {
-      return res.status(200).json({
-        sessionPresent: true,
-        expiresAt,
-        cookieConfig: getAuthCookieConfig(),
-      });
-    }
-
+  const authClient = getAuthClient();
+  if (authClient) {
     const { data, error } = await authClient.auth.getUser(accessToken);
     if (error || !data?.user) {
       clearAuthCookies(res);
-      return res.status(200).json({
-        sessionPresent: false,
-        cookieConfig: getAuthCookieConfig(),
-      });
+      return res.status(401).json(
+        errorResponse('INVALID_TOKEN', 'Invalid access token', { cookieConfig: getAuthCookieConfig() })
+      );
     }
+  }
 
-    return res.status(200).json({
+  setAuthCookies(res, {
+    accessToken,
+    refreshToken,
+    expiresAt: Number.isFinite(expiresAt) ? expiresAt : undefined,
+    expiresIn: Number.isFinite(expiresIn) ? expiresIn : undefined,
+  });
+
+  return res.status(200).json(
+    successResponse({ cookieConfig: getAuthCookieConfig() })
+  );
+}));
+
+router.post('/clear', (_req, res) => {
+  clearAuthCookies(res);
+  return res.status(200).json(
+    successResponse({ cookieConfig: getAuthCookieConfig() })
+  );
+});
+
+router.get('/session', asyncHandler(async (req, res) => {
+  const { accessToken, refreshToken, expiresAt } = readAuthCookies(req);
+
+  if (!accessToken || !refreshToken) {
+    return res.status(200).json(
+      successResponse({ sessionPresent: false, cookieConfig: getAuthCookieConfig() })
+    );
+  }
+
+  const authClient = getAuthClient();
+  if (!authClient) {
+    return res.status(200).json(
+      successResponse({ sessionPresent: true, expiresAt, cookieConfig: getAuthCookieConfig() })
+    );
+  }
+
+  const { data, error } = await authClient.auth.getUser(accessToken);
+  if (error || !data?.user) {
+    clearAuthCookies(res);
+    return res.status(200).json(
+      successResponse({ sessionPresent: false, cookieConfig: getAuthCookieConfig() })
+    );
+  }
+
+  return res.status(200).json(
+    successResponse({
       sessionPresent: true,
       expiresAt,
       cookieConfig: getAuthCookieConfig(),
-      user: {
-        id: data.user.id,
-        email: data.user.email || null,
-      },
-    });
-  } catch (error) {
-    console.error('[auth] failed to inspect session cookies:', error);
-    clearAuthCookies(res);
-    return res.status(500).json({
-      error: 'Failed to inspect session cookies',
-      cookieConfig: getAuthCookieConfig(),
-    });
-  }
-});
+      user: { id: data.user.id, email: data.user.email || null },
+    })
+  );
+}));
 
 export default router;

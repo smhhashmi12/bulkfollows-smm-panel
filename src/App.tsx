@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, startTransition, useEffect, useRef, useState } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { authAPI } from './lib/api';
@@ -462,7 +463,7 @@ const App: React.FC = () => {
     deferredUiReady && !['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   return (
-    <>
+    <ErrorBoundary>
       <NotificationProvider>
         <CurrencyProvider>
           <Suspense fallback={<AppLoadingScreen />}>
@@ -476,7 +477,7 @@ const App: React.FC = () => {
           <Analytics />
         </Suspense>
       ) : null}
-    </>
+    </ErrorBoundary>
   );
 };
 

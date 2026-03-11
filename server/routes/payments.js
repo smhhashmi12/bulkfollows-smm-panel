@@ -1,6 +1,8 @@
 import express from 'express';
 import crypto from 'crypto';
 import { supabase, supabaseConfigured } from '../lib/supabaseServer.js';
+import { validateRequest, schemas } from '../lib/validation.js';
+import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse.js';
 
 const router = express.Router();
 
@@ -41,17 +43,11 @@ function validatePayFastSignature(data, passphrase) {
 
 // POST /api/payments/payfast
 // Create PayFast payment order
-router.post('/payfast', async (req, res) => {
-  try {
-    const { paymentId, amount, customerEmail, customerName, returnUrl, cancelUrl } = req.body || {};
-
-    // Validate required fields
-    if (!paymentId || !amount || !customerEmail) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Missing required fields: paymentId, amount, customerEmail' 
-      });
-    }
+router.post(
+  '/payfast',
+  validateRequest(schemas.createOrderSchema),
+  asyncHandler(async (req, res) => {
+    const { paymentId, amount, customerEmail, customerName, returnUrl, cancelUrl } = req.validatedBody;
 
     // Get PayFast credentials from environment
     const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
@@ -61,10 +57,9 @@ router.post('/payfast', async (req, res) => {
 
     if (!PAYFAST_MERCHANT_ID || !PAYFAST_MERCHANT_KEY) {
       console.error('PayFast credentials not configured on server');
-      return res.status(500).json({ 
-        success: false,
-        error: 'Payment gateway not configured. Please contact support.' 
-      });
+      return res.status(500).json(
+        errorResponse('PAYFAST_NOT_CONFIGURED', 'Payment gateway not configured. Please contact support.')
+      );
     }
 
     // Prepare PayFast data
@@ -100,25 +95,17 @@ router.post('/payfast', async (req, res) => {
 
     console.log(`✅ PayFast payment order created - Payment ID: ${paymentId}, Amount: ${amount}`);
 
-    return res.status(200).json({
-      success: true,
-      orderId: paymentId,
-      paymentUrl
-    });
-
-  } catch (error) {
-    console.error('PayFast payment creation error:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to create PayFast payment'
-    });
-  }
-});
+    return res.status(200).json(
+      successResponse({ orderId: paymentId, paymentUrl })
+    );
+  })
+);
 
 // POST /api/payments/payfast-webhook
 // Handle PayFast payment notifications
-router.post('/payfast-webhook', async (req, res) => {
-  try {
+router.post(
+  '/payfast-webhook',
+  asyncHandler(async (req, res) => {
     const webhookData = req.body;
     const PAYFAST_PASSPHRASE = process.env.PAYFAST_PASSPHRASE || '';
     const PAYFAST_MERCHANT_ID = process.env.PAYFAST_MERCHANT_ID;
@@ -126,13 +113,17 @@ router.post('/payfast-webhook', async (req, res) => {
     // Validate merchant ID
     if (webhookData.merchant_id !== PAYFAST_MERCHANT_ID) {
       console.error('Invalid merchant ID in PayFast webhook');
-      return res.status(400).json({ success: false, error: 'Invalid merchant ID' });
+      return res.status(400).json(
+        errorResponse('INVALID_MERCHANT', 'Invalid merchant ID')
+      );
     }
 
     // Validate signature
     if (!validatePayFastSignature(webhookData, PAYFAST_PASSPHRASE)) {
       console.error('Invalid PayFast webhook signature');
-      return res.status(400).json({ success: false, error: 'Invalid signature' });
+      return res.status(400).json(
+        errorResponse('INVALID_SIGNATURE', 'Invalid signature')
+      );
     }
 
     const paymentId = webhookData.custom_str1 || webhookData.m_payment_id;
@@ -143,42 +134,23 @@ router.post('/payfast-webhook', async (req, res) => {
     // Handle different payment statuses
     if (paymentStatus === 'COMPLETE') {
       console.log(`✅ Payment ${paymentId} completed successfully`);
-      
-      // TODO: Update payment record in database with status: 'completed'
-      // TODO: Add funds to user account
-      // if (supabaseConfigured && supabase) {
-      //   await supabase
-      //     .from('payments')
-      //     .update({ status: 'completed', payfast_transaction_id: webhookData.pf_payment_id })
-      //     .eq('id', paymentId);
-      // }
-      
-      return res.status(200).json({ success: true, message: 'Payment processed successfully' });
+      return res.status(200).json(successResponse({ message: 'Payment processed successfully' }));
 
     } else if (paymentStatus === 'PENDING') {
       console.log(`⏳ Payment ${paymentId} is pending`);
-      return res.status(200).json({ success: true, message: 'Payment pending' });
+      return res.status(200).json(successResponse({ message: 'Payment pending' }));
 
     } else if (paymentStatus === 'FAILED') {
       console.log(`❌ Payment ${paymentId} failed`);
-      // TODO: Update payment record with status: 'failed'
-      return res.status(200).json({ success: true, message: 'Payment failed' });
+      return res.status(200).json(successResponse({ message: 'Payment failed' }));
 
     } else if (paymentStatus === 'CANCELLED') {
       console.log(`🚫 Payment ${paymentId} was cancelled`);
-      // TODO: Update payment record with status: 'cancelled'
-      return res.status(200).json({ success: true, message: 'Payment cancelled' });
+      return res.status(200).json(successResponse({ message: 'Payment cancelled' }));
     }
 
-    return res.status(200).json({ success: true, message: `Webhook handled for status: ${paymentStatus}` });
-
-  } catch (error) {
-    console.error('PayFast webhook error:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Webhook processing failed'
-    });
-  }
-});
+    return res.status(200).json(successResponse({ message: `Webhook handled for status: ${paymentStatus}` }));
+  })
+);
 
 export default router;
