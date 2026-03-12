@@ -12,7 +12,17 @@ dotenv.config();
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(cors());
+
+// Explicit CORS configuration for Vercel
+const corsOptions = {
+  origin: true, // Allow any origin (or configure specific domains in production)
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -125,11 +135,18 @@ async function registerRoutes() {
   return app;
 }
 
-export const appReady = registerRoutes();
+let cachedApp = null;
+
+export const appReady = registerRoutes().then((app) => {
+  cachedApp = app;
+  return app;
+});
 
 export async function handleRequest(req, res) {
-  await appReady;
-  return app(req, res);
+  if (!cachedApp) {
+    await appReady;
+  }
+  return cachedApp(req, res);
 }
 
-export default app;
+export default cachedApp;
