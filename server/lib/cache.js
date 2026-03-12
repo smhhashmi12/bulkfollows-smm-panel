@@ -195,15 +195,15 @@ class CacheStore {
 }
 
 /**
- * Global cache instance with 10-minute TTL and 8-second fetch timeout
+ * Global cache instance with 10-minute TTL and 5-second fetch timeout
  * Falls back to stale cache if fetch times out
  */
-export const globalCache = new CacheStore(10 * 60 * 1000, 8000);
+export const globalCache = new CacheStore(10 * 60 * 1000, 5000);
 
 /**
- * Admin cache instance with 5-minute TTL and 8-second fetch timeout
+ * Admin cache instance with 5-minute TTL and 5-second fetch timeout
  */
-export const adminCache = new CacheStore(5 * 60 * 1000, 8000);
+export const adminCache = new CacheStore(5 * 60 * 1000, 5000);
 
 /**
  * HTTP response caching middleware
