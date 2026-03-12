@@ -6,6 +6,8 @@ import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse
 const router = express.Router();
 const SUPABASE_QUERY_TIMEOUT_MS = 12000;
 const PROVIDER_SERVICES_CACHE_TTL_MS = 60000;
+const PAGED_QUERY_SIZE = 1000;
+const PAGED_QUERY_MAX_ROWS = 50000;
 
 let providerServicesCache = {
   expiresAt: 0,
@@ -60,6 +62,29 @@ async function runTimedQuery(query, label) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function fetchAllRows(buildQuery, label) {
+  const rows = [];
+
+  for (let offset = 0; offset < PAGED_QUERY_MAX_ROWS; offset += PAGED_QUERY_SIZE) {
+    const from = offset;
+    const to = offset + PAGED_QUERY_SIZE - 1;
+
+    const { data, error } = await runTimedQuery(buildQuery(from, to), `${label} (page ${offset / PAGED_QUERY_SIZE + 1})`);
+    if (error) {
+      return { data: rows, error };
+    }
+
+    const page = Array.isArray(data) ? data : [];
+    rows.push(...page);
+
+    if (page.length < PAGED_QUERY_SIZE) {
+      break;
+    }
+  }
+
+  return { data: rows, error: null };
 }
 
 // GET /api/integrations/provider-names
@@ -231,21 +256,23 @@ router.get(
       );
     }
 
-    const { data: providerServices, error } = await runTimedQuery(
-      supabaseAdmin
-        .from('provider_services')
-        .select(`
-          id,
-          provider_id,
-          provider_service_id,
-          provider_rate,
-          our_rate,
-          min_quantity,
-          max_quantity,
-          status,
-          service_id
-        `)
-        .eq('status', 'active'),
+    const { data: providerServices, error } = await fetchAllRows(
+      (from, to) =>
+        supabaseAdmin
+          .from('provider_services')
+          .select(`
+            id,
+            provider_id,
+            provider_service_id,
+            provider_rate,
+            our_rate,
+            min_quantity,
+            max_quantity,
+            status,
+            service_id
+          `)
+          .eq('status', 'active')
+          .range(from, to),
       'provider services query'
     );
 
@@ -255,12 +282,13 @@ router.get(
       return res.json(successResponse({ providerServices: [] }));
     }
 
-    const { data: allServices, error: servicesError } = await runTimedQuery(
-      supabaseAdmin
-        .from('services')
-        .select('id, name, category, description, status')
-        .eq('status', 'active')
-        .limit(5000),
+    const { data: allServices, error: servicesError } = await fetchAllRows(
+      (from, to) =>
+        supabaseAdmin
+          .from('services')
+          .select('id, name, category, description, status')
+          .eq('status', 'active')
+          .range(from, to),
       'services mapping query'
     );
 

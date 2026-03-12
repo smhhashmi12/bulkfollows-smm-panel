@@ -44,6 +44,37 @@ const clampQuantity = (value, fallback = 1) => {
   return Math.min(Math.max(parsed, 1), MAX_INT32);
 };
 
+const sanitizeUnicode = (value) => {
+  const input = String(value ?? '');
+  if (!input) return '';
+
+  // Drop null bytes and lone surrogates (PostgREST can reject invalid unicode in JSON bodies).
+  let out = '';
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    if (code === 0) continue;
+
+    // High surrogate
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = input.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += input[i] + input[i + 1];
+        i += 1;
+      }
+      continue;
+    }
+
+    // Lone low surrogate
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+
+    out += input[i];
+  }
+
+  return out.trim();
+};
+
 const limitText = (value, maxLength = 240) => {
   const text = String(value || '').trim();
   if (text.length <= maxLength) return text;
@@ -377,14 +408,23 @@ router.post(
     let clampedQuantityCount = 0;
 
     const normalizedServices = services.map((svc, index) => {
-      const providerServiceId = pickFirst(svc.service, svc.id, `unknown_${index}`);
-      const rawServiceName = pickFirst(
+      const providerServiceId = sanitizeUnicode(pickFirst(svc.service, svc.id, `unknown_${index}`)) || `unknown_${index}`;
+      const rawServiceName = sanitizeUnicode(pickFirst(
         svc.name,
         svc.service_name,
         svc.title,
         `Service #${providerServiceId}`
-      );
-      const rawCategory = pickFirst(svc.category, svc.group, svc.service_type, 'Other');
+      ));
+      const rawCategory = sanitizeUnicode(pickFirst(svc.category, svc.group, svc.service_type, 'Other'));
+      const rawDescription = sanitizeUnicode(pickFirst(
+        svc.description,
+        svc.desc,
+        svc.details,
+        svc.note,
+        svc.notes,
+        svc.info,
+        ''
+      ));
       const rawProviderRate = toNumber(pickFirst(svc.rate, svc.price), 0);
       const rawMinQuantity = toInteger(pickFirst(svc.min, svc.min_quantity), 1);
       const rawMaxQuantity = toInteger(pickFirst(svc.max, svc.max_quantity), 10000);
@@ -403,8 +443,10 @@ router.post(
 
       return {
         providerServiceId,
-        serviceName: limitText(rawServiceName, 180),
+        // Include provider service id to avoid name collisions (and match typical SMM UI patterns).
+        serviceName: limitText(`${providerServiceId} - ${rawServiceName}`, 180),
         category: limitText(rawCategory, 80),
+        description: limitText(rawDescription, 8000),
         providerRate,
         ourRate,
         minQuantity,
@@ -423,7 +465,10 @@ router.post(
     const serviceUpserts = normalizedServices.map((item) => ({
       name: item.serviceName,
       category: item.category,
-      description: `Provider ID: ${provider_id} | Provider Service ID: ${item.providerServiceId} | Provider Rate: ${item.providerRate} | Min: ${item.minQuantity} | Max: ${item.maxQuantity}`,
+      description: [
+        String(item.description || '').trim(),
+        `Provider ID: ${provider_id} | Provider Service ID: ${item.providerServiceId} | Provider Rate: ${item.providerRate} | Min: ${item.minQuantity} | Max: ${item.maxQuantity}`,
+      ].filter(Boolean).join('\n\n'),
       rate_per_1000: item.ourRate,
       min_quantity: item.minQuantity,
       max_quantity: item.maxQuantity,
@@ -432,75 +477,154 @@ router.post(
 
     let serviceIdByName = new Map();
 
-    const { data: upsertedServices, error: upsertServicesError } = await supabaseAdmin
+    // Mark prior synced services for this provider as inactive so old names don't linger.
+    await supabaseAdmin
       .from('services')
-      .upsert(serviceUpserts, { onConflict: 'name' })
-      .select('id, name');
+      .update({ status: 'inactive', updated_at: new Date().toISOString() })
+      .ilike('description', `%Provider ID: ${provider_id}%`);
 
-    if (!upsertServicesError) {
-      (upsertedServices || []).forEach((service) => {
-        serviceIdByName.set(service.name, service.id);
+    // Avoid Postgres "ON CONFLICT DO UPDATE command cannot affect row a second time"
+    // by deduping same-name rows inside each upsert batch.
+    const serviceUpsertsByName = new Map();
+    serviceUpserts.forEach((row) => {
+      if (!row?.name) return;
+      serviceUpsertsByName.set(row.name, row);
+    });
+    const dedupedServiceUpserts = Array.from(serviceUpsertsByName.values());
+
+    const SERVICE_UPSERT_CHUNK_SIZE = 250;
+    const skippedServiceNames = [];
+    const upsertErrorSamples = [];
+
+    const upsertChunk = async (rows) => {
+      return await supabaseAdmin
+        .from('services')
+        .upsert(rows, { onConflict: 'name', defaultToNull: false })
+        .select('id, name');
+    };
+
+    const captureUpsertError = (error) => {
+      if (!error) return;
+      if (upsertErrorSamples.length >= 3) return;
+      upsertErrorSamples.push({
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
       });
-    } else {
-      // Fallback for databases where services.name unique constraint is not yet applied.
-      console.warn('[sync-services] Service upsert failed, using row-by-row fallback:', upsertServicesError.message);
-      for (const row of serviceUpserts) {
-        const { data: existingService } = await supabaseAdmin
-          .from('services')
-          .select('id')
-          .eq('name', row.name)
-          .maybeSingle();
+    };
 
-        if (existingService?.id) {
-          await supabaseAdmin
-            .from('services')
-            .update({
-              category: row.category,
-              description: row.description,
-              rate_per_1000: row.rate_per_1000,
-              min_quantity: row.min_quantity,
-              max_quantity: row.max_quantity,
-              status: row.status,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', existingService.id);
-          serviceIdByName.set(row.name, existingService.id);
-        } else {
-          const { data: createdService, error: createServiceError } = await supabaseAdmin
-            .from('services')
-            .insert(row)
-            .select('id, name')
-            .single();
-          if (createServiceError || !createdService) {
-            return res.status(500).json({
-              success: false,
-              message: 'Failed to create system service during sync',
-              error: createServiceError?.message || 'Unknown service insert error',
-            });
-          }
-          serviceIdByName.set(createdService.name, createdService.id);
-        }
+    const isMissingUniqueConstraint = (error) => {
+      const msg = String(error?.message || '').toLowerCase();
+      return (
+        msg.includes('unique or exclusion constraint') ||
+        msg.includes('there is no unique') ||
+        msg.includes('on conflict') ||
+        String(error?.code || '') === '42P10'
+      );
+    };
+
+    const upsertWithSplit = async (rows) => {
+      if (!rows || rows.length === 0) return;
+
+      const { data: upsertedChunk, error } = await upsertChunk(rows);
+      if (!error) {
+        (upsertedChunk || []).forEach((service) => {
+          serviceIdByName.set(service.name, service.id);
+        });
+        return;
       }
-    }
 
-    // Re-read service IDs by name from DB for reliability, independent of upsert response shape.
-    const uniqueNames = Array.from(new Set(normalizedServices.map((item) => item.serviceName)));
-    const { data: dbServices, error: dbServicesError } = await supabaseAdmin
-      .from('services')
-      .select('id, name')
-      .in('name', uniqueNames);
+      captureUpsertError(error);
 
-    if (dbServicesError) {
+      if (isMissingUniqueConstraint(error)) {
+        throw new Error(
+          'services.name must be UNIQUE for sync to work. Apply migration `supabase/migrations/add_unique_constraint_services_name.sql` and retry.'
+        );
+      }
+
+      if (rows.length === 1) {
+        const row = rows[0];
+
+        // Retry once with a minimal description (raw provider descriptions sometimes contain invalid unicode).
+        const minimalDescription = String(row.description || '')
+          .split('\n\n')
+          .slice(-1)[0]
+          .trim();
+
+        const { data: retried, error: retryError } = await upsertChunk([
+          {
+            ...row,
+            description: minimalDescription || null,
+          },
+        ]);
+
+        if (!retryError) {
+          (retried || []).forEach((service) => {
+            serviceIdByName.set(service.name, service.id);
+          });
+          return;
+        }
+
+        captureUpsertError(retryError);
+        skippedServiceNames.push({ name: row?.name, error: retryError?.message || String(retryError) });
+        return;
+      }
+
+      const mid = Math.ceil(rows.length / 2);
+      await upsertWithSplit(rows.slice(0, mid));
+      await upsertWithSplit(rows.slice(mid));
+    };
+
+    try {
+      for (let i = 0; i < dedupedServiceUpserts.length; i += SERVICE_UPSERT_CHUNK_SIZE) {
+        const chunk = dedupedServiceUpserts.slice(i, i + SERVICE_UPSERT_CHUNK_SIZE);
+        await upsertWithSplit(chunk);
+      }
+    } catch (upsertError) {
+      console.error('[sync-services] Service upsert failed:', upsertError);
       return res.status(500).json({
         success: false,
-        message: 'Failed to fetch synced services from database',
-        error: dbServicesError.message,
+        message: upsertError?.message || 'Failed to upsert services during sync',
+        error_samples: upsertErrorSamples,
       });
     }
 
-    (dbServices || []).forEach((service) => {
-      serviceIdByName.set(service.name, service.id);
-    });
+    if (skippedServiceNames.length > 0) {
+      console.warn('[sync-services] Skipped services during upsert:', {
+        skippedCount: skippedServiceNames.length,
+        sample: skippedServiceNames.slice(0, 5),
+      });
+    }
+
+    // Ensure we can resolve ids for every upserted name. PostgREST can occasionally omit rows from the
+    // upsert response when nothing changed, so we backfill via a follow-up query.
+    const skippedNameSet = new Set(skippedServiceNames.map((row) => String(row?.name || '').trim()).filter(Boolean));
+    if (serviceIdByName.size < dedupedServiceUpserts.length - skippedNameSet.size) {
+      const missingNames = dedupedServiceUpserts
+        .map((row) => String(row?.name || '').trim())
+        .filter((name) => name && !skippedNameSet.has(name) && !serviceIdByName.has(name));
+
+      const NAME_LOOKUP_CHUNK_SIZE = 500;
+      for (let i = 0; i < missingNames.length; i += NAME_LOOKUP_CHUNK_SIZE) {
+        const chunk = missingNames.slice(i, i + NAME_LOOKUP_CHUNK_SIZE);
+        const { data: found } = await supabaseAdmin
+          .from('services')
+          .select('id, name')
+          .in('name', chunk);
+
+        (found || []).forEach((service) => {
+          serviceIdByName.set(service.name, service.id);
+        });
+      }
+
+      if (serviceIdByName.size < dedupedServiceUpserts.length - skippedNameSet.size) {
+        console.warn('[sync-services] Some upserted services could not be resolved by name.', {
+          expected: dedupedServiceUpserts.length - skippedNameSet.size,
+          resolved: serviceIdByName.size,
+        });
+      }
+    }
 
     const providerMappings = normalizedServices
       .map((item) => {
@@ -542,20 +666,25 @@ router.post(
         count: 0,
         synced_count: 0,
         message: 'Provider returned services, but no valid mappings were created.',
+        skipped_services: skippedServiceNames.length,
       });
     }
 
-    const { error: insertMappingsError } = await supabaseAdmin
-      .from('provider_services')
-      .insert(dedupedMappings);
+    const PROVIDER_MAPPING_CHUNK_SIZE = 1000;
+    for (let i = 0; i < dedupedMappings.length; i += PROVIDER_MAPPING_CHUNK_SIZE) {
+      const chunk = dedupedMappings.slice(i, i + PROVIDER_MAPPING_CHUNK_SIZE);
+      const { error: insertMappingsError } = await supabaseAdmin
+        .from('provider_services')
+        .insert(chunk, { defaultToNull: false });
 
-    if (insertMappingsError) {
-      console.error('[sync-services] Failed to insert provider mappings:', insertMappingsError);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to save provider mappings',
-        error: insertMappingsError.message,
-      });
+      if (insertMappingsError) {
+        console.error('[sync-services] Failed to insert provider mappings:', insertMappingsError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to save provider mappings',
+          error: insertMappingsError.message,
+        });
+      }
     }
 
     await supabaseAdmin
@@ -569,6 +698,7 @@ router.post(
       success: true,
       count: dedupedMappings.length,
       synced_count: dedupedMappings.length,
+      skipped_services: skippedServiceNames.length,
       message: `Synced ${dedupedMappings.length} services from provider with ${markupPercent}% markup`,
       services: dedupedMappings,
     });

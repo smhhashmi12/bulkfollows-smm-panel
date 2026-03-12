@@ -85,6 +85,7 @@ async function registerRoutes() {
   const [
     { default: authRouter },
     { default: servicesRouter },
+    { default: publicServicesRouter },
     { default: webhookRouter },
     { default: integrationsRouter },
     { default: fastpayRouter },
@@ -94,6 +95,7 @@ async function registerRoutes() {
   ] = await Promise.all([
     import('./routes/auth.js'),
     import('./routes/services.js'),
+    import('./routes/publicServices.js'),
     import('./routes/webhook.js'),
     import('./routes/integrations.js'),
     import('./routes/fastpay.js'),
@@ -103,6 +105,7 @@ async function registerRoutes() {
   ]);
 
   app.use('/api/auth', authRouter);
+  app.use('/api/services', publicServicesRouter);
   app.use('/api/admin/services', servicesRouter);
   app.use('/webhook/fastpay', webhookRouter);
   app.use('/api/webhook/fastpay', webhookRouter);

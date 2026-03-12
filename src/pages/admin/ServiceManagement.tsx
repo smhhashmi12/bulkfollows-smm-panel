@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { adminAPI, Service } from '../../lib/api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { adminAPI, Provider, Service } from '../../lib/api';
+import { useAdminServices, useUpdateService, useCreateService, useDeleteService } from '../../lib/useAdminServices';
 import { isTimeoutError } from '../../lib/utils';
 
 const statusColors: { [key: string]: string } = {
@@ -7,13 +8,56 @@ const statusColors: { [key: string]: string } = {
   inactive: 'bg-red-500/20 text-red-400',
 };
 
+type ProviderServiceRow = {
+  id: string;
+  provider_id: string;
+  provider_service_id: string;
+  provider_rate: number;
+  our_rate: number;
+  min_quantity: number;
+  max_quantity: number;
+  status: 'active' | 'inactive';
+  service_id: string | null;
+  services?: {
+    id: string;
+    name: string;
+    category: string;
+    description: string | null;
+    status: 'active' | 'inactive';
+  } | null;
+};
+
+const PROVIDER_SERVICES_TIMEOUT_MS = 12000;
+
 const ServiceManagementPage: React.FC = () => {
-  const [services, setServices] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
+  // React Query hooks for services data
+  const { data: servicesData = [], isLoading: servicesLoading, error: servicesError, status: servicesStatus } = useAdminServices();
+  console.log('ServiceManagement - React Query state:', { 
+    dataLength: servicesData?.length, 
+    isLoading: servicesLoading, 
+    error: servicesError, 
+    status: servicesStatus 
+  });
+  const { mutate: updateSvc, isPending: updatePending } = useUpdateService();
+  const { mutate: createSvc, isPending: createPending } = useCreateService();
+  const { mutate: deleteSvc, isPending: deletePending } = useDeleteService();
+
+  // Local state
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [providerServices, setProviderServices] = useState<ProviderServiceRow[]>([]);
   const [error, setError] = useState('');
+  const [isReloading, setIsReloading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentService, setCurrentService] = useState<Service | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(updatePending || createPending);
+
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [providerFilter, setProviderFilter] = useState('all'); // 'all' | 'manual' | provider_id
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   const [formData, setFormData] = useState({
     name: '',
     category: '',
@@ -24,23 +68,54 @@ const ServiceManagementPage: React.FC = () => {
     description: '',
   });
 
-  // Fetch services on component mount
-  useEffect(() => {
-    fetchServices();
-  }, []);
+  // Use services data from React Query instead of state
+  const services = servicesData;
+  console.log('ServiceManagement - services data:', services?.length, servicesLoading);
 
-  const fetchServices = async () => {
+  const fetchProviderServices = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PROVIDER_SERVICES_TIMEOUT_MS);
+
     try {
-      setLoading(true);
-      setError('');
-      const data = await adminAPI.getAllServices();
-      setServices(data);
+      const response = await fetch('/api/integrations/provider-services', { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`Failed to load provider services: ${response.status} ${response.statusText}`);
+      }
+
+      const payload = await response.json();
+      const rows = Array.isArray(payload?.providerServices) ? payload.providerServices : [];
+      setProviderServices(rows);
     } catch (err: any) {
-      const msg = isTimeoutError(err) ? 'Request timed out. Please refresh.' : 'Error fetching services';
-      console.error('Error fetching services:', err);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.warn('[admin/services] provider-services request timed out; provider filter disabled.');
+      } else {
+        console.error('[admin/services] provider-services request failed:', err);
+      }
+
+      setProviderServices([]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const fetchProviders = async () => {
+    const data = await adminAPI.getAllProviders();
+    setProviders((data || []) as Provider[]);
+  };
+
+  const reloadAll = async () => {
+    try {
+      setError('');
+      setIsReloading(true);
+      // Services are now loaded via React Query automatically
+      // Just fetch providers and provider services
+      await Promise.all([fetchProviders(), fetchProviderServices()]);
+    } catch (err: any) {
+      const msg = isTimeoutError(err) ? 'Request timed out. Please refresh.' : 'Error fetching data';
+      console.error('Error fetching data:', err);
       setError(msg);
     } finally {
-      setLoading(false);
+      setIsReloading(false);
     }
   };
 
@@ -87,25 +162,125 @@ const ServiceManagementPage: React.FC = () => {
     }
     
     try {
-      setIsSubmitting(true);
       setError('');
       if (currentService) {
-        // Update existing service
-        await adminAPI.updateService(currentService.id, formData);
+        // Update existing service using mutation hook
+        updateSvc(
+          { serviceId: currentService.id, updates: formData },
+          {
+            onSuccess: () => {
+              setIsModalOpen(false);
+              setCurrentService(null);
+            },
+            onError: (err: any) => {
+              console.error('Error updating service:', err);
+              setError('Failed to update service. Please try again.');
+            },
+          }
+        );
       } else {
-        // Create new service
-        await adminAPI.createService(formData);
+        // Create new service using mutation hook
+        createSvc(formData as any, {
+          onSuccess: () => {
+            setIsModalOpen(false);
+            setCurrentService(null);
+          },
+          onError: (err: any) => {
+            console.error('Error creating service:', err);
+            setError('Failed to create service. Please try again.');
+          },
+        });
       }
-      
-      await fetchServices();
-      setIsModalOpen(false);
     } catch (err: any) {
       console.error('Error saving service:', err);
       setError('Failed to save service. Please try again.');
-    } finally {
-      setIsSubmitting(false);
     }
   };
+
+  const providerById = useMemo(() => {
+    const map = new Map<string, Provider>();
+    (providers || []).forEach((provider) => {
+      map.set(String(provider.id), provider);
+    });
+    return map;
+  }, [providers]);
+
+  const providerServicesByServiceId = useMemo(() => {
+    const map = new Map<string, ProviderServiceRow[]>();
+    (providerServices || []).forEach((row) => {
+      const serviceId = String(row.service_id || '').trim();
+      if (!serviceId) return;
+      const existing = map.get(serviceId) || [];
+      existing.push(row);
+      map.set(serviceId, existing);
+    });
+    return map;
+  }, [providerServices]);
+
+  const categories = useMemo(() => {
+    return Array.from(
+      new Set(
+        (services || [])
+          .map((service) => String(service.category || '').trim())
+          .filter((value) => value !== '')
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [services]);
+
+  const filteredServices = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    const sorted = [...(services || [])].sort((a, b) => {
+      const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''), undefined, { sensitivity: 'base' });
+      if (categoryCompare !== 0) return categoryCompare;
+      const nameCompare = String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+      if (nameCompare !== 0) return nameCompare;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    const result = sorted.filter((service) => {
+      if (statusFilter !== 'all' && service.status !== statusFilter) return false;
+      if (categoryFilter !== 'all' && service.category !== categoryFilter) return false;
+
+      const mappings = providerServicesByServiceId.get(service.id) || [];
+      if (providerFilter !== 'all') {
+        if (providerFilter === 'manual') {
+          if (mappings.length > 0) return false;
+        } else if (!mappings.some((m) => m.provider_id === providerFilter)) {
+          return false;
+        }
+      }
+
+      if (!q) return true;
+
+      const nameMatch = String(service.name || '').toLowerCase().includes(q);
+      const categoryMatch = String(service.category || '').toLowerCase().includes(q);
+      if (nameMatch || categoryMatch) return true;
+
+      for (const mapping of mappings) {
+        const providerName = String(providerById.get(mapping.provider_id)?.name || mapping.provider_id).toLowerCase();
+        const providerServiceId = String(mapping.provider_service_id || '').toLowerCase();
+        if (providerName.includes(q) || providerServiceId.includes(q)) return true;
+      }
+
+      return false;
+    });
+
+    console.log('ServiceManagement - filtered services:', result.length, 'from', services?.length);
+    return result;
+  }, [services, statusFilter, categoryFilter, providerFilter, search, providerServicesByServiceId, providerById]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredServices.length / Math.max(1, pageSize)));
+  const paginatedServices = useMemo(() => {
+    const safePageSize = Math.max(1, pageSize);
+    const safePage = Math.max(1, Math.min(page, totalPages));
+    const start = (safePage - 1) * safePageSize;
+    return filteredServices.slice(start, start + safePageSize);
+  }, [filteredServices, page, pageSize, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, categoryFilter, providerFilter, statusFilter, pageSize, services.length, providerServices.length]);
 
   const handleToggleStatus = async (service: Service) => {
     if (!confirm(`Are you sure you want to ${service.status === 'active' ? 'deactivate' : 'activate'} this service?`)) {
@@ -114,8 +289,15 @@ const ServiceManagementPage: React.FC = () => {
     
     try {
       const newStatus = service.status === 'active' ? 'inactive' : 'active';
-      await adminAPI.updateService(service.id, { ...service, status: newStatus });
-      await fetchServices();
+      updateSvc(
+        { serviceId: service.id, updates: { ...service, status: newStatus } },
+        {
+          onError: (err: any) => {
+            console.error('Error updating service status:', err);
+            setError('Failed to update service status. Please try again.');
+          },
+        }
+      );
     } catch (err: any) {
       console.error('Error updating service status:', err);
       setError('Failed to update service status. Please try again.');
@@ -128,26 +310,95 @@ const ServiceManagementPage: React.FC = () => {
     }
     
     try {
-      setLoading(true);
-      await adminAPI.deleteService(serviceId);
-      await fetchServices();
+      deleteSvc(serviceId, {
+        onError: (err: any) => {
+          console.error('Error deleting service:', err);
+          setError('Failed to delete service. Please try again.');
+        },
+      });
     } catch (err: any) {
       console.error('Error deleting service:', err);
       setError('Failed to delete service. Please try again.');
-    } finally {
-      setLoading(false);
     }
   };
 
   return (
-    <div>
-      <div className="flex justify-end items-center mb-6">
-        <button 
-          onClick={() => handleOpenModal()}
-          className="bg-gradient-to-r from-brand-accent to-brand-purple hover:opacity-90 text-white font-semibold px-4 py-2 rounded-lg"
-        >
-          Add New Service
-        </button>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-5xl lg:grid-cols-5">
+          <div className="sm:col-span-2 lg:col-span-2">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Search</label>
+            <div className="relative">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search services, categories, provider ids..."
+                className="w-full ds-glass rounded-lg p-2 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple"
+              />
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+              </svg>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
+            >
+              <option value="all">All Categories</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Provider</label>
+            <select
+              value={providerFilter}
+              onChange={(e) => setProviderFilter(e.target.value)}
+              className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
+            >
+              <option value="all">All Providers</option>
+              <option value="manual">Manual (No Provider)</option>
+              {(providers || []).map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 lg:justify-end">
+          <div className="hidden text-xs text-gray-400 lg:block">
+            Showing <span className="font-semibold text-gray-200">{filteredServices.length}</span> / {services.length}
+          </div>
+          <button
+            onClick={() => handleOpenModal()}
+            className="bg-gradient-to-r from-brand-accent to-brand-purple hover:opacity-90 text-white font-semibold px-4 py-2 rounded-lg"
+          >
+            Add New Service
+          </button>
+        </div>
       </div>
       
       {error && (
@@ -157,18 +408,19 @@ const ServiceManagementPage: React.FC = () => {
       )}
       
       <div className="bg-brand-container border border-brand-border rounded-2xl">
-        <div className="overflow-x-auto ds-scrollbar">
-          {loading && services.length === 0 ? (
+        <div className="max-h-[calc(100vh-18rem)] overflow-auto ds-scrollbar">
+          {servicesLoading && services.length === 0 ? (
             <div className="p-8 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
               <p className="mt-2">Loading services...</p>
             </div>
           ) : (
             <table className="w-full text-sm text-left">
-              <thead className="bg-black/20">
+              <thead className="sticky top-0 z-10 bg-black/40 backdrop-blur">
                 <tr>
                   <th className="p-4 font-semibold">Name</th>
                   <th className="p-4 font-semibold">Category</th>
+                  <th className="p-4 font-semibold">Provider</th>
                   <th className="p-4 font-semibold text-right">Rate (per 1k)</th>
                   <th className="p-4 font-semibold text-center">Min/Max</th>
                   <th className="p-4 font-semibold">Status</th>
@@ -176,11 +428,43 @@ const ServiceManagementPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-brand-border">
-                {services.length > 0 ? (
-                  services.map(service => (
+                {paginatedServices.length > 0 ? (
+                  paginatedServices.map(service => {
+                    const mappings = providerServicesByServiceId.get(service.id) || [];
+                    const firstMapping = mappings[0];
+                    const providerName = firstMapping ? (providerById.get(firstMapping.provider_id)?.name || firstMapping.provider_id) : '';
+                    const providerCell = mappings.length === 0
+                      ? 'Manual'
+                      : `${providerName} · #${String(firstMapping?.provider_service_id || '').trim()}`;
+                    const providerTitle = mappings.length === 0
+                      ? 'Manual service (no provider link found).'
+                      : mappings
+                          .map((m) => {
+                            const name = providerById.get(m.provider_id)?.name || m.provider_id;
+                            return `${name} (#${m.provider_service_id})`;
+                          })
+                          .join(', ');
+
+                    return (
                     <tr key={service.id} className="hover:bg-black/10">
-                      <td className="p-4 font-medium">{service.name}</td>
-                      <td className="p-4 text-gray-300">{service.category}</td>
+                      <td className="p-4 font-medium">
+                        <div className="max-w-[32rem] truncate" title={service.name}>
+                          {service.name}
+                        </div>
+                      </td>
+                      <td className="p-4 text-gray-300">
+                        <div className="max-w-[16rem] truncate" title={service.category}>
+                          {service.category}
+                        </div>
+                      </td>
+                      <td className="p-4 text-gray-300">
+                        <div className="max-w-[18rem] truncate" title={providerTitle}>
+                          {providerCell}
+                          {mappings.length > 1 ? (
+                            <span className="ml-2 text-xs text-gray-500">+{mappings.length - 1}</span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="p-4 font-mono text-right text-green-400">
                         ${service.rate_per_1000.toFixed(4)}
                       </td>
@@ -200,7 +484,7 @@ const ServiceManagementPage: React.FC = () => {
                             onClick={() => handleOpenModal(service)}
                             className="text-blue-400 hover:text-white p-1 rounded hover:bg-blue-500/20"
                             title="Edit"
-                            disabled={loading}
+                            disabled={servicesLoading || updatePending}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                               <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
@@ -210,7 +494,7 @@ const ServiceManagementPage: React.FC = () => {
                             onClick={() => handleToggleStatus(service)}
                             className={`p-1 rounded ${service.status === 'active' ? 'text-yellow-400 hover:bg-yellow-500/20' : 'text-green-400 hover:bg-green-500/20'}`}
                             title={service.status === 'active' ? 'Deactivate' : 'Activate'}
-                            disabled={loading}
+                            disabled={updatePending}
                           >
                             {service.status === 'active' ? (
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -226,7 +510,7 @@ const ServiceManagementPage: React.FC = () => {
                             onClick={() => handleDeleteService(service.id)}
                             className="text-red-400 hover:text-white p-1 rounded hover:bg-red-500/20"
                             title="Delete"
-                            disabled={loading}
+                            disabled={deletePending}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                               <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -235,17 +519,71 @@ const ServiceManagementPage: React.FC = () => {
                         </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-gray-400">
-                      No services found. Create your first service to get started.
+                    <td colSpan={7} className="p-8 text-center text-gray-400">
+                      No services found.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           )}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs text-gray-400">
+          Showing{' '}
+          <span className="font-semibold text-gray-200">
+            {filteredServices.length === 0 ? 0 : (page - 1) * pageSize + 1}
+          </span>
+          -
+          <span className="font-semibold text-gray-200">
+            {Math.min(page * pageSize, filteredServices.length)}
+          </span>{' '}
+          of <span className="font-semibold text-gray-200">{filteredServices.length}</span> (total {services.length})
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value) || 25)}
+            className="bg-black/20 border border-brand-border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-purple focus:outline-none"
+            aria-label="Rows per page"
+          >
+            <option value={25}>25 / page</option>
+            <option value={50}>50 / page</option>
+            <option value={100}>100 / page</option>
+          </select>
+
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-3 py-1.5 rounded-lg border border-brand-border bg-white/5 text-sm disabled:opacity-50 hover:bg-white/10"
+          >
+            Prev
+          </button>
+          <div className="px-2 text-sm text-gray-300">
+            Page <span className="font-semibold text-white">{page}</span> / {totalPages}
+          </div>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="px-3 py-1.5 rounded-lg border border-brand-border bg-white/5 text-sm disabled:opacity-50 hover:bg-white/10"
+          >
+            Next
+          </button>
+
+          <button
+            onClick={() => reloadAll()}
+            disabled={isReloading}
+            className="ml-2 px-3 py-1.5 rounded-lg border border-brand-border bg-white/5 text-sm disabled:opacity-50 hover:bg-white/10"
+          >
+            Refresh
+          </button>
         </div>
       </div>
 

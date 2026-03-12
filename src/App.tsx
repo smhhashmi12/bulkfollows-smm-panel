@@ -5,6 +5,7 @@ import { supabase } from './lib/supabase';
 import { authAPI } from './lib/api';
 import { CurrencyProvider } from './lib/CurrencyContext';
 import { NotificationProvider } from './lib/NotificationContext';
+import { QueryClientProvider } from './lib/QueryClientProvider';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
@@ -464,19 +465,21 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <NotificationProvider>
-        <CurrencyProvider>
-          <Suspense fallback={<AppLoadingScreen />}>
-            {renderPage()}
-            {deferredUiReady && shouldShowChat ? <LiveChatWidget /> : null}
+      <QueryClientProvider>
+        <NotificationProvider>
+          <CurrencyProvider>
+            <Suspense fallback={<AppLoadingScreen />}>
+              {renderPage()}
+              {deferredUiReady && shouldShowChat ? <LiveChatWidget /> : null}
+            </Suspense>
+          </CurrencyProvider>
+        </NotificationProvider>
+        {shouldShowAnalytics ? (
+          <Suspense fallback={null}>
+            <Analytics />
           </Suspense>
-        </CurrencyProvider>
-      </NotificationProvider>
-      {shouldShowAnalytics ? (
-        <Suspense fallback={null}>
-          <Analytics />
-        </Suspense>
-      ) : null}
+        ) : null}
+      </QueryClientProvider>
     </ErrorBoundary>
   );
 };
