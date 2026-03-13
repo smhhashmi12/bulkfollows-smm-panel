@@ -12,7 +12,17 @@ dotenv.config();
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(cors());
+
+// Explicit CORS configuration for Vercel
+const corsOptions = {
+  origin: true, // Allow any origin (or configure specific domains in production)
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -115,6 +125,7 @@ async function registerRoutes() {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/provider', providerRouter);
 
+  // health check
   app.get('/api/health', (_req, res) => {
     res.json({
       ok: true,
@@ -123,17 +134,27 @@ async function registerRoutes() {
       supabaseAdminConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY),
     });
   });
-
   app.get('/', (_req, res) => res.send('BulkFollows backend running'));
+
+  // global error handler (should be last middleware)
+  const { errorHandler } = await import('./lib/apiResponse.js');
+  app.use(errorHandler);
 
   return app;
 }
 
-export const appReady = registerRoutes();
+let cachedApp = null;
+
+export const appReady = registerRoutes().then((app) => {
+  cachedApp = app;
+  return app;
+});
 
 export async function handleRequest(req, res) {
-  await appReady;
-  return app(req, res);
+  if (!cachedApp) {
+    await appReady;
+  }
+  return cachedApp(req, res);
 }
 
-export default app;
+export default cachedApp;

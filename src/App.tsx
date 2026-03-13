@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, startTransition, useEffect, useRef, useState } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { authAPI } from './lib/api';
@@ -115,25 +116,18 @@ const App: React.FC = () => {
     writeCachedUser(user);
   };
 
-  const restoreCachedUser = (sessionUserId?: string) => {
+  const restoreCachedUser = (sessionUserId?: string): User | null => {
     const cachedUser = readCachedUser();
-
-    if (!cachedUser) {
-      return null;
-    }
-
-    if (sessionUserId && cachedUser.id && cachedUser.id !== sessionUserId) {
+    
+    if (!cachedUser) return null;
+    
+    // Single validation logic - eliminate duplicate checks
+    if (sessionUserId && cachedUser.id !== sessionUserId) {
       writeCachedUser(null);
-      if (currentUserRef.current?.id === cachedUser.id) {
-        persistCurrentUser(null);
-      }
+      persistCurrentUser(null);  // Use persistCurrentUser instead of ref check
       return null;
     }
-
-    if (cachedUser.id && sessionUserId && cachedUser.id !== sessionUserId) {
-      return null;
-    }
-
+    
     persistCurrentUser(cachedUser);
     return cachedUser;
   };
@@ -470,21 +464,23 @@ const App: React.FC = () => {
     deferredUiReady && !['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   return (
-    <QueryClientProvider>
-      <NotificationProvider>
-        <CurrencyProvider>
-          <Suspense fallback={<AppLoadingScreen />}>
-            {renderPage()}
-            {deferredUiReady && shouldShowChat ? <LiveChatWidget /> : null}
+    <ErrorBoundary>
+      <QueryClientProvider>
+        <NotificationProvider>
+          <CurrencyProvider>
+            <Suspense fallback={<AppLoadingScreen />}>
+              {renderPage()}
+              {deferredUiReady && shouldShowChat ? <LiveChatWidget /> : null}
+            </Suspense>
+          </CurrencyProvider>
+        </NotificationProvider>
+        {shouldShowAnalytics ? (
+          <Suspense fallback={null}>
+            <Analytics />
           </Suspense>
-        </CurrencyProvider>
-      </NotificationProvider>
-      {shouldShowAnalytics ? (
-        <Suspense fallback={null}>
-          <Analytics />
-        </Suspense>
-      ) : null}
-    </QueryClientProvider>
+        ) : null}
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 };
 

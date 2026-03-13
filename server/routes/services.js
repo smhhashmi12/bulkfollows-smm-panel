@@ -50,6 +50,15 @@ router.get('/', async (req, res) => {
   const startTime = Date.now();
 
   try {
+    console.log('[Services Route] GET /api/admin/services - request received');
+    
+    // Quick check: if database not configured, return empty immediately
+    if (!supabaseConfigured || !supabase) {
+      console.log('[Services Route] Supabase not configured, returning empty array');
+      res.set('Cache-Control', 'public, max-age=60');
+      return res.json({ services: [] });
+    }
+
     // Use admin cache with timeout protection
     const services = await adminCache.get('admin:services', () => fetchServicesWithTimeout(8000));
 
@@ -60,20 +69,21 @@ router.get('/', async (req, res) => {
     res.set('X-Cache-Source', 'server');
     res.set('X-Response-Time-Ms', String(age));
 
-    console.log(`[Admin Services] GET /api/admin/services - ${services.length} services - ${age}ms`);
+    console.log(`[Services Route] GET /api/admin/services - ${services.length} services - ${age}ms`);
 
     return res.json({ services });
   } catch (err) {
     const age = Date.now() - startTime;
-    console.error('Error fetching admin services:', {
+    console.error('[Services Route] Error fetching admin services:', {
       error: err.message,
       duration: age,
+      stack: err.stack,
     });
 
     // Return graceful fallback instead of error
     res.set('Cache-Control', 'public, max-age=60'); // 1 minute fallback
     res.set('X-Cache-Source', 'fallback');
-    
+    res.status(500);
     return res.json({
       services: [],
       error: 'Services temporarily unavailable',

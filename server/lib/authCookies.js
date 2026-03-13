@@ -9,6 +9,17 @@ const parseBoolean = (value, fallback = false) => {
   return ['1', 'true', 'yes', 'on'].includes(normalized);
 };
 
+const isLocalhost = () => {
+  const serverUrl = process.env.SERVER_URL || process.env.VERCEL_URL || 'http://localhost:4000';
+  try {
+    const url = new URL(serverUrl);
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+};
+
 const getCookieSameSite = () => {
   const value = String(process.env.AUTH_COOKIE_SAME_SITE || 'lax').trim().toLowerCase();
   if (value === 'strict' || value === 'none') {
@@ -31,6 +42,12 @@ const isSecureCookieEnabled = (sameSite = getCookieSameSite()) => {
   const explicitValue = String(process.env.AUTH_COOKIE_SECURE || '').trim();
   if (explicitValue) {
     return parseBoolean(explicitValue, false);
+  }
+
+  // Allow insecure cookies for localhost in development
+  const isDev = process.env.NODE_ENV === 'development';
+  if (isDev && isLocalhost()) {
+    return false;  // Allow http in dev
   }
 
   if (sameSite === 'none') {

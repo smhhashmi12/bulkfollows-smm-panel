@@ -1,237 +1,76 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getSessionUser, supabase } from '../lib/supabase';
-import { chatAPI, ChatChannel, ChatMessage } from '../lib/chat';
+import React, { useEffect, useState } from 'react';
+import { getSessionUser } from '../lib/supabase';
+import useChat from '../hooks/useChat';
+import useChatSocket from '../hooks/useChatSocket';
 import { chatPlatforms, getChatPlatform, ChatPlatformId } from './chat/chatConfig';
+import { ChatMessage } from '../lib/chat';
 
 const formatTime = (value: string) =>
   new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const LiveChatWidget: React.FC = () => {
   const [open, setOpen] = useState(false);
-  const [activePlatform, setActivePlatform] = useState<ChatPlatformId>('live');
   const [userId, setUserId] = useState<string | null>(null);
-  const [channels, setChannels] = useState<Record<ChatPlatformId, ChatChannel | null>>(() => {
-    const seed = {} as Record<ChatPlatformId, ChatChannel | null>;
-    chatPlatforms.forEach((platform) => {
-      seed[platform.id] = null;
-    });
-    return seed;
-  });
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState('');
-  const [loadingChannels, setLoadingChannels] = useState(false);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  const activeChannel = channels[activePlatform];
-  const isClosed = activeChannel?.status === 'closed';
-
-  const platformMeta = useMemo(() => getChatPlatform(activePlatform), [activePlatform]);
-
-  const loadUserSession = async () => {
-    const user = await getSessionUser();
-    setUserId(user?.id ?? null);
-  };
-
-  const loadChannels = async () => {
-    setLoadingChannels(true);
-    try {
-      const data = await chatAPI.getUserChannels();
-      const map = {} as Record<ChatPlatformId, ChatChannel | null>;
-      chatPlatforms.forEach((platform) => {
-        map[platform.id] = null;
-      });
-      data.forEach((channel) => {
-        map[channel.platform] = channel;
-      });
-      setChannels(map);
-    } catch (err) {
-      console.error('Failed to load chat channels:', err);
-      setError('Unable to load chat channels right now.');
-    } finally {
-      setLoadingChannels(false);
-    }
-  };
-
-  const loadMessages = async (channelId: string) => {
-    setLoadingMessages(true);
-    try {
-      const data = await chatAPI.getChannelMessages(channelId);
-      setMessages(data);
-    } catch (err) {
-      console.error('Failed to load chat messages:', err);
-      setError('Unable to load chat messages right now.');
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
-
-  const ensureChannel = async () => {
-    if (!userId) {
-      throw new Error('Please login to start a chat.');
-    }
-    if (activeChannel) return activeChannel;
-    const channel = await chatAPI.upsertChannel(userId, activePlatform);
-    setChannels((prev) => ({ ...prev, [activePlatform]: channel }));
-    return channel;
-  };
-
-  const appendMessage = (message: ChatMessage) => {
-    setMessages((prev) => {
-      if (prev.some((item) => item.id === message.id)) return prev;
-      return [...prev, message];
-    });
-    setChannels((prev) => {
-      const channel = prev[activePlatform];
-      if (!channel) return prev;
-      return {
-        ...prev,
-        [activePlatform]: {
-          ...channel,
-          last_message: message.body,
-          last_sender_role: message.sender_role,
-          last_message_at: message.created_at,
-          updated_at: message.created_at,
-        },
-      };
-    });
-  };
-
-  const handleSend = async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    if (isClosed) {
-      setError('This chat is closed. Please start a new request.');
-      return;
-    }
-    setError(null);
-    setSending(true);
-    try {
-      const channel = await ensureChannel();
-      const message = await chatAPI.sendMessage({
-        channelId: channel.id,
-        senderId: userId,
-        senderRole: 'user',
-        body: text,
-      });
-      appendMessage(message);
-      setDraft('');
-    } catch (err) {
-      console.error('Failed to send chat message:', err);
-      setError('Message failed to send. Try again.');
-    } finally {
-      setSending(false);
-    }
-  };
-
+  // load session when widget opens
   useEffect(() => {
     if (!open) return;
-    loadUserSession();
+    getSessionUser().then((u) => setUserId(u?.id ?? null));
   }, [open]);
 
-  useEffect(() => {
-    if (!open || !userId) return;
-    loadChannels();
-  }, [open, userId]);
+  const chat = useChat(userId);
+  const socket = useChatSocket(chat.activeChannel?.id ?? null);
 
-  useEffect(() => {
-    if (!open) return;
-    if (activeChannel?.id) {
-      loadMessages(activeChannel.id);
-      return;
-    }
-    setMessages([]);
-  }, [open, activeChannel?.id, activePlatform]);
+  const toggleOpen = () => setOpen((prev) => !prev);
 
-  useEffect(() => {
-    if (!open || !activeChannel?.id) return;
-    const channel = supabase
-      .channel(`chat_messages:${activeChannel.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `channel_id=eq.${activeChannel.id}`,
-        },
-        (payload) => {
-          appendMessage(payload.new as ChatMessage);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [open, activeChannel?.id, activePlatform]);
-
-  useEffect(() => {
-    if (!open || !userId) return;
-    const channel = supabase
-      .channel(`chat_channels:${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'chat_channels',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const updated = payload.new as ChatChannel;
-          setChannels((prev) => ({
-            ...prev,
-            [updated.platform]: { ...(prev[updated.platform] || updated), ...updated },
-          }));
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [open, userId]);
-
-  useEffect(() => {
-    if (!open) return;
-    scrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, open]);
+  const platformMeta = getChatPlatform(chat.activePlatform);
 
   return (
-    <div className="fixed bottom-5 right-5 z-[60]">
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="ds-btn-primary px-4 py-3 rounded-full flex items-center gap-2 shadow-purple-glow"
-        >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M4 5h16v11H9l-5 4V5z" />
-          </svg>
-          <span className="text-sm font-semibold">Live Chat</span>
-        </button>
-      )}
-
+    <div className={`fixed bottom-4 right-4 w-80 shadow-lg ${open ? 'h-96' : 'h-12'} transition-all`}>
+      <div className="bg-brand-dark text-white p-2 flex justify-between items-center cursor-pointer" onClick={toggleOpen}>
+        <span>{open ? 'Live Chat' : 'Chat'}</span>
+        <span>{open ? '−' : '+'}</span>
+      </div>
       {open && (
-        <div className="w-[92vw] max-w-[390px] bg-brand-container border border-brand-border rounded-2xl shadow-xl overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-black/30">
-            <div>
-              <p className="text-sm font-semibold text-white">Support Chat</p>
-              <p className="text-xs text-gray-400">Online - Avg reply 2-5 min</p>
-            </div>
+        <div className="bg-white h-full flex flex-col">
+          <div className="flex space-x-2 p-2">
+            {chatPlatforms.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => chat.setActivePlatform(p.id)}
+                className={`flex-1 py-1 rounded ${chat.activePlatform === p.id ? 'bg-brand-purple text-white' : 'bg-gray-100'}`}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {chat.loadingMessages ? (
+              <div>Loading messages...</div>
+            ) : (
+              chat.messages.map((m: ChatMessage) => (
+                <div key={m.id} className="mb-2">
+                  <div className="text-xs text-gray-500">{formatTime(m.created_at)}</div>
+                  <div className="text-sm">{m.body}</div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="p-2 border-t">
+            <input
+              className="w-full border rounded px-2 py-1"
+              value={chat.draft}
+              onChange={(e) => chat.setDraft(e.target.value)}
+              disabled={chat.sending || !!chat.isClosed}
+            />
             <button
-              onClick={() => setOpen(false)}
-              className="h-8 w-8 rounded-full bg-black/30 text-gray-300 hover:text-white hover:bg-black/50 transition"
-              aria-label="Close chat"
+              className="mt-1 w-full bg-brand-purple text-white py-1 rounded"
+              onClick={() => chat.sendMessage(chat.draft)}
+              disabled={chat.sending || !!chat.isClosed}
             >
-              <svg viewBox="0 0 24 24" className="h-4 w-4 mx-auto" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
+              Send
             </button>
           </div>
-
           <div className="px-3 py-3 border-b border-brand-border overflow-x-auto ds-scrollbar">
             <div className="flex items-center gap-2">
               {chatPlatforms.map((platform) => (
