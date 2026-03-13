@@ -498,7 +498,8 @@ router.post(
     console.error('[test-provider] Outer catch error:', error);
     return res.status(500).json(errorResponse('INTERNAL_ERROR', error.message || 'Internal server error', { balance: 0 }));
   }
-});
+  })
+);
 
 // POST /api/admin/sync-provider-services - Sync services from provider
 router.post(
@@ -950,7 +951,8 @@ router.post(
       message: serverError.message,
     });
   }
-});
+  })
+);
 
 // GET /api/admin/provider-services - list provider services with provider + system service details
 router.get(
@@ -1099,7 +1101,8 @@ router.get(
     const serverError = getSupabaseServerError(error);
     return res.status(serverError.status).json(errorResponse('UNEXPECTED_PROVIDER_SERVICES_ERROR', serverError.message));
   }
-});
+  })
+);
 
 // PATCH /api/admin/provider-services/:id - update provider mapping fields
 router.patch(
@@ -1180,7 +1183,8 @@ router.patch(
     const serverError = getSupabaseServerError(error);
     return res.status(serverError.status).json(errorResponse('UNEXPECTED_UPDATE_ERROR', serverError.message));
   }
-});
+  })
+);
 
 // POST /api/admin/provider-services/filter-categories
 // Keep only selected categories for a provider, delete the rest
@@ -1357,7 +1361,8 @@ router.post('/settings', asyncHandler(async (req, res) => {
     console.error('[settings] save error:', error);
     return res.status(500).json(errorResponse('SETTINGS_SAVE_ERROR', error.message || 'Internal server error'));
   }
-});
+  })
+);
 
 // Margin Rules CRUD
 router.get('/margin-rules', async (req, res) => {
