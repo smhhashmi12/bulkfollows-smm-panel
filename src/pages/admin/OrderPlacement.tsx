@@ -216,8 +216,10 @@ const OrderPlacementPage: React.FC = () => {
 
                                 {/* Time Selection with Dynamic Pricing */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-2">Delivery Time</label>
+                                    <label htmlFor="order-delivery-time" className="block text-sm font-medium text-gray-300 mb-2">Delivery Time</label>
                                     <select
+                                        id="order-delivery-time"
+                                        name="orderDeliveryTime"
                                         value={selectedTime}
                                         onChange={(e) => setSelectedTime(parseInt(e.target.value))}
                                         className="w-full bg-black/20 border border-brand-border rounded-lg p-3 focus:ring-2 focus:ring-brand-purple focus:outline-none"
@@ -239,6 +241,7 @@ const OrderPlacementPage: React.FC = () => {
                                     <input
                                         type="url"
                                         id="link"
+                                        name="orderLink"
                                         value={link}
                                         onChange={(e) => setLink(e.target.value)}
                                         placeholder="https://www.instagram.com/username"
@@ -253,6 +256,7 @@ const OrderPlacementPage: React.FC = () => {
                                     <input
                                         type="number"
                                         id="quantity"
+                                        name="orderQuantity"
                                         value={quantity}
                                         onChange={(e) => setQuantity(e.target.value)}
                                         placeholder="500"

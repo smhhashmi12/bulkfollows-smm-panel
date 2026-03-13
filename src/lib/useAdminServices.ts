@@ -1,5 +1,6 @@
 import { useQuery, UseMutationResult, useMutation, useQueryClient, UseQueryResult } from '@tanstack/react-query';
 import { Service } from './useServices';
+import { withTimeout } from './withTimeout';
 
 interface AdminServicesResponse {
   services: Service[];
@@ -16,17 +17,36 @@ interface AdminServicesResponse {
  */
 async function fetchAdminServices(): Promise<Service[]> {
   const controller = new AbortController();
-  // Use 15-second timeout (server timeout is 8 seconds)
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutMs = 15000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch('/api/admin/services', {
-      signal: controller.signal,
-    });
+    const response = await withTimeout<Response | null>(
+      fetch('/api/admin/services', { signal: controller.signal }),
+      timeoutMs,
+      null,
+      'admin services request'
+    );
+    if (!response) {
+      return [];
+    }
 
     console.log('[Admin Services] Response status:', response.status);
-    // Parse response regardless of status
-    const data: AdminServicesResponse = await response.json();
+
+    const raw = await withTimeout<string>(
+      response.text(),
+      timeoutMs,
+      '',
+      'admin services body'
+    );
+
+    let data: AdminServicesResponse = { services: [] };
+    try {
+      data = raw ? JSON.parse(raw) : { services: [] };
+    } catch (parseError) {
+      console.warn('[Admin Services] Response was not valid JSON');
+    }
+
     console.log('[Admin Services] Response data:', data);
     
     if (!response.ok) {
@@ -46,6 +66,7 @@ async function fetchAdminServices(): Promise<Service[]> {
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    controller.abort();
   }
 }
 
@@ -69,7 +90,7 @@ export function useAdminServices(): UseQueryResult<Service[], Error> {
     staleTime: 0, // Disable caching to force fresh data
     gcTime: 0, // Disable garbage time cache
     retry: false, // Disable retries to see the actual result
-    refetchOnWindowFocus: true, // Enable refetch on focus
+    refetchOnWindowFocus: false, // Avoid refetch loops while debugging
     // Remove initialData to see if query is actually running
   });
 }

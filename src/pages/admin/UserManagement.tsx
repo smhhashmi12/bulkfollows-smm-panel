@@ -198,9 +198,10 @@ const UserManagementPage: React.FC = () => {
                         
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium mb-1">Username</label>
+                                <label htmlFor="edit-user-username" className="block text-sm font-medium mb-1">Username</label>
                                 <input
                                     type="text"
+                                    id="edit-user-username"
                                     name="username"
                                     value={formData.username}
                                     onChange={handleInputChange}
@@ -210,9 +211,10 @@ const UserManagementPage: React.FC = () => {
                             </div>
                             
                             <div>
-                                <label className="block text-sm font-medium mb-1">Email</label>
+                                <label htmlFor="edit-user-email" className="block text-sm font-medium mb-1">Email</label>
                                 <input
                                     type="email"
+                                    id="edit-user-email"
                                     name="email"
                                     value={formData.email}
                                     onChange={handleInputChange}
@@ -222,11 +224,12 @@ const UserManagementPage: React.FC = () => {
                             </div>
                             
                             <div>
-                                <label className="block text-sm font-medium mb-1">Balance</label>
+                                <label htmlFor="edit-user-balance" className="block text-sm font-medium mb-1">Balance</label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
                                     <input
                                         type="number"
+                                        id="edit-user-balance"
                                         name="balance"
                                         value={formData.balance}
                                         onChange={handleInputChange}
@@ -238,8 +241,9 @@ const UserManagementPage: React.FC = () => {
                             </div>
                             
                             <div>
-                                <label className="block text-sm font-medium mb-1">Role</label>
+                                <label htmlFor="edit-user-role" className="block text-sm font-medium mb-1">Role</label>
                                 <select
+                                    id="edit-user-role"
                                     name="role"
                                     value={formData.role}
                                     onChange={handleInputChange}

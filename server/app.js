@@ -115,6 +115,15 @@ async function registerRoutes() {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/provider', providerRouter);
 
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      serverTime: new Date().toISOString(),
+      supabaseConfigured: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL ? true : false,
+      supabaseAdminConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY),
+    });
+  });
+
   app.get('/', (_req, res) => res.send('BulkFollows backend running'));
 
   return app;

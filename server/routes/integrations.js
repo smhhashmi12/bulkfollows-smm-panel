@@ -12,6 +12,10 @@ let providerServicesCache = {
   value: null,
 };
 
+export function invalidateProviderServicesCache() {
+  providerServicesCache = { expiresAt: 0, value: null };
+}
+
 const getApiKeyFromRequest = (req) => {
   const directKey = req.headers['x-api-key'];
   if (directKey) {
@@ -287,36 +291,33 @@ router.get('/provider-services', async (req, res) => {
       return res.json({ ok: true, providerServices: [] });
     }
 
-    const { data: allServices, error: servicesError } = await fetchAllRows(
-      (from, to) =>
-        supabaseAdmin
-          .from('services')
-          .select('id, name, category, description, status')
-          .eq('status', 'active')
-          .range(from, to),
-      'services mapping query'
+    const serviceIds = Array.from(
+      new Set((providerServices || []).map((row) => row.service_id).filter(Boolean))
     );
-
     const serviceById = new Map();
-    const serviceByProviderServiceId = new Map();
-    if (servicesError) {
-      console.error('[Server] Error fetching services for mapping:', servicesError);
-    } else {
-      (allServices || []).forEach((svc) => {
-        serviceById.set(String(svc.id), svc);
-        const providerSvcId = extractProviderServiceId(svc.description);
-        if (providerSvcId && !serviceByProviderServiceId.has(providerSvcId)) {
-          serviceByProviderServiceId.set(providerSvcId, svc);
+    if (serviceIds.length > 0) {
+      const CHUNK = 500;
+      for (let i = 0; i < serviceIds.length; i += CHUNK) {
+        const chunk = serviceIds.slice(i, i + CHUNK);
+        const { data: servicesData, error: servicesError } = await supabaseAdmin
+          .from('services')
+          .select('id, name, category, status')
+          .in('id', chunk);
+        if (servicesError) {
+          console.error('[Server] Error fetching services for mapping:', servicesError);
+          break;
         }
-      });
+        (servicesData || []).forEach((svc) => {
+          serviceById.set(String(svc.id), svc);
+        });
+      }
     }
 
     const mergedProviderServices = (providerServices || []).map((row) => {
       const byId = row.service_id ? serviceById.get(String(row.service_id)) : null;
-      const byProviderServiceId = serviceByProviderServiceId.get(String(row.provider_service_id || '').trim()) || null;
       return {
         ...row,
-        services: byId || byProviderServiceId || null,
+        services: byId || null,
       };
     });
 

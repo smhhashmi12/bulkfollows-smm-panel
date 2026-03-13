@@ -1,9 +1,9 @@
 import { getSessionUser, supabase, withSupabaseTimeout } from './supabase';
 import type { User } from '../App';
 
-const PROVIDER_SERVICES_TIMEOUT_MS = 5000;
+const PROVIDER_SERVICES_TIMEOUT_MS = 15000;
 const PROVIDER_SERVICES_CACHE_TTL_MS = 60000;
-const PROVIDER_SERVICES_FAILURE_BACKOFF_MS = 15000;
+const PROVIDER_SERVICES_FAILURE_BACKOFF_MS = 8000;
 const PROVIDER_SERVICE_LINK_TIMEOUT_MS = 8000;
 const AUTH_LOOKUP_TIMEOUT_MS = 8000;
 const SUPABASE_QUERY_TIMEOUT_MS = 12000;
@@ -197,6 +197,63 @@ export interface Provider {
   created_at?: string;
 }
 
+export interface MarginRule {
+  id: string;
+  provider_id: string | null;
+  service_id: string | null;
+  category: string | null;
+  margin_type: 'percent' | 'fixed';
+  margin_value: number;
+  min_margin?: number | null;
+  max_margin?: number | null;
+  active: boolean;
+  priority: number;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MarginVersion {
+  id: string;
+  provider_id: string | null;
+  created_by?: string | null;
+  source: string;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface MarginAnalysis {
+  total_services: number;
+  avg_margin_percent: number;
+  avg_margin_amount: number;
+  distribution: Array<{ label: string; min: number; max: number; count: number }>;
+  providers: Array<{
+    provider_id: string;
+    count: number;
+    avg_margin_percent: number;
+    avg_margin_amount: number;
+  }>;
+}
+
+export interface CompetitorPrice {
+  id: string;
+  service_id: string;
+  provider_name: string;
+  price_per_1000: number;
+  quality_score: number;
+  delivery_time_hours: number;
+  captured_at?: string;
+}
+
+export interface ProviderQualityRating {
+  id: string;
+  provider_id: string;
+  quality_score: number;
+  notes?: string | null;
+  updated_at?: string;
+}
+
 // Auth Functions
 export const authAPI = {
   async signInWithGoogle(redirectHash = '#/dashboard/new-order') {
@@ -336,49 +393,25 @@ export const authAPI = {
 // Services Functions
 export const servicesAPI = {
   async getServices(category?: string) {
-    const PAGE_SIZE = 1000;
-    const MAX_ROWS = 50000;
-
-    const rows: Service[] = [];
-    for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
-      let query = supabase
-        .from('services')
-        .select('*')
-        .eq('status', 'active')
-        .order('category', { ascending: true })
-        .order('name', { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
-
-      if (category) {
-        query = query.eq('category', category);
-      }
-
-      const { data, error } = await runSupabaseQuery(query, `services list page ${offset / PAGE_SIZE + 1}`);
-      if (error) throw error;
-
-      const page = (data || []) as Service[];
-      rows.push(...page);
-
-      if (page.length < PAGE_SIZE) {
-        break;
-      }
+    const response = await fetch('/api/services');
+    if (!response.ok) {
+      throw new Error(`Failed to fetch services: ${response.status} ${response.statusText}`);
     }
-
-    return rows;
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.services) ? payload.services : [];
+    if (category) {
+      return rows.filter((service: Service) => service.category === category);
+    }
+    return rows as Service[];
   },
 
   async getService(id: string) {
-    const { data, error } = await runSupabaseQuery(
-      supabase
-        .from('services')
-        .select('*')
-        .eq('id', id)
-        .single(),
-      'service detail'
-    );
-
-    if (error) throw error;
-    return data as Service;
+    const response = await fetch(`/api/services/${encodeURIComponent(id)}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch service: ${response.status} ${response.statusText}`);
+    }
+    const payload = await response.json();
+    return payload?.service as Service;
   },
 
   // Get merged services (regular services + provider services)
@@ -475,7 +508,17 @@ export const ordersAPI = {
 
     if (!Number.isFinite(charge)) {
       const service = await servicesAPI.getService(serviceId);
-      charge = (service.rate_per_1000 / 1000) * quantity;
+      let ratePer1000 = service.rate_per_1000;
+      try {
+        const providerServices = await getProviderServicesSnapshot();
+        const match = providerServices.find((row: any) => String(row?.service_id || '').trim() === String(serviceId).trim());
+        if (match?.our_rate !== undefined && match?.our_rate !== null) {
+          ratePer1000 = Number(match.our_rate);
+        }
+      } catch {
+        // fallback to service rate if provider snapshot fails
+      }
+      charge = (ratePer1000 / 1000) * quantity;
     }
 
     // Check user balance
@@ -834,44 +877,6 @@ export const adminAPI = {
     if (error) throw error;
   },
 
-  async createProvider(provider: any) {
-    const { data, error } = await runSupabaseQuery(
-      supabase
-        .from('providers')
-        .insert(provider)
-        .select()
-        .single(),
-      'admin provider create'
-    );
-    if (error) throw error;
-    return data;
-  },
-
-  async updateProvider(providerId: string, updates: any) {
-    const { data, error } = await runSupabaseQuery(
-      supabase
-        .from('providers')
-        .update(updates)
-        .eq('id', providerId)
-        .select()
-        .single(),
-      'admin provider update'
-    );
-    if (error) throw error;
-    return data;
-  },
-
-  async deleteProvider(providerId: string) {
-    const { error } = await runSupabaseQuery(
-      supabase
-        .from('providers')
-        .delete()
-        .eq('id', providerId),
-      'admin provider delete'
-    );
-    if (error) throw error;
-  },
-
   // Order Management
   async getAllOrders() {
     const { data, error } = await runSupabaseQuery(
@@ -1155,5 +1160,196 @@ export const adminAPI = {
     }
 
     return payload?.settings ?? {};
+  },
+
+  async applyProviderMargin(providerId: string, marginType: 'percent' | 'fixed', marginValue: number) {
+    const response = await fetch('/api/admin/provider-margins/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider_id: providerId, margin_type: marginType, margin_value: marginValue }),
+    });
+    const raw = await response.text();
+    let payload: any = {};
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error('Provider margin API returned invalid JSON. Ensure server routes are deployed.');
+    }
+    if (!response.ok) throw new Error(payload?.message || 'Failed to apply provider margin');
+    return payload;
+  },
+
+  async resetProviderMargin(providerId: string) {
+    const response = await fetch('/api/admin/provider-margins/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider_id: providerId }),
+    });
+    const raw = await response.text();
+    let payload: any = {};
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error('Provider margin reset returned invalid JSON. Ensure server routes are deployed.');
+    }
+    if (!response.ok) throw new Error(payload?.message || 'Failed to reset provider margin');
+    return payload;
+  },
+
+  // Margin Rules
+  async getMarginRules(params?: { provider_id?: string; service_id?: string; category?: string; active?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.provider_id) query.set('provider_id', params.provider_id);
+    if (params?.service_id) query.set('service_id', params.service_id);
+    if (params?.category) query.set('category', params.category);
+    if (params?.active !== undefined) query.set('active', String(params.active));
+
+    const response = await fetch(`/api/admin/margin-rules?${query.toString()}`);
+    const raw = await response.text();
+    let payload: any = {};
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error('Margin rules API returned invalid JSON. Ensure server routes are deployed.');
+    }
+    if (!response.ok) throw new Error(payload?.message || 'Failed to load margin rules');
+    return (payload?.rules || []) as MarginRule[];
+  },
+
+  async createMarginRule(rule: Partial<MarginRule>) {
+    const response = await fetch('/api/admin/margin-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rule),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to create margin rule');
+    return payload?.rule as MarginRule;
+  },
+
+  async updateMarginRule(ruleId: string, updates: Partial<MarginRule>) {
+    const response = await fetch(`/api/admin/margin-rules/${ruleId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to update margin rule');
+    return payload?.rule as MarginRule;
+  },
+
+  async deleteMarginRule(ruleId: string) {
+    const response = await fetch(`/api/admin/margin-rules/${ruleId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.message || 'Failed to delete margin rule');
+    }
+  },
+
+  async previewMarginRules(csv: string) {
+    const response = await fetch('/api/admin/margin-rules/bulk-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to preview margin rules');
+    return payload?.rows || [];
+  },
+
+  async applyMarginRules(payload: { csv?: string; rows?: any[]; provider_id?: string; source?: string; notes?: string }) {
+    const response = await fetch('/api/admin/margin-rules/bulk-apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.message || 'Failed to apply margin rules');
+    return data;
+  },
+
+  async getMarginVersions(providerId?: string) {
+    const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
+    const response = await fetch(`/api/admin/margin-versions${query}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to load margin versions');
+    return (payload?.versions || []) as MarginVersion[];
+  },
+
+  async rollbackMarginVersion(versionId: string) {
+    const response = await fetch(`/api/admin/margin-versions/${versionId}/rollback`, {
+      method: 'POST',
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to rollback margin version');
+    return payload;
+  },
+
+  async getMarginAnalysis(providerId?: string) {
+    const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
+    const response = await fetch(`/api/admin/margin-analysis${query}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to load margin analysis');
+    return payload as MarginAnalysis;
+  },
+
+  async getServiceComparison(params: { service_id: string; limit?: number; sort?: string }) {
+    const query = new URLSearchParams();
+    query.set('service_id', params.service_id);
+    if (params.limit) query.set('limit', String(params.limit));
+    if (params.sort) query.set('sort', params.sort);
+    const response = await fetch(`/api/admin/service-comparison?${query.toString()}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to load service comparison');
+    return payload;
+  },
+
+  async getCompetitorPrices(serviceId?: string) {
+    const query = serviceId ? `?service_id=${encodeURIComponent(serviceId)}` : '';
+    const response = await fetch(`/api/admin/competitor-prices${query}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to load competitor prices');
+    return (payload?.prices || []) as CompetitorPrice[];
+  },
+
+  async bulkCompetitorPrices(rows: CompetitorPrice[]) {
+    const response = await fetch('/api/admin/competitor-prices/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to save competitor prices');
+    return payload;
+  },
+
+  async getProviderQualityRatings(providerId?: string) {
+    const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
+    const response = await fetch(`/api/admin/provider-quality-ratings${query}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to load provider quality ratings');
+    return (payload?.ratings || []) as ProviderQualityRating[];
+  },
+
+  async createProviderQualityRating(rating: Partial<ProviderQualityRating>) {
+    const response = await fetch('/api/admin/provider-quality-ratings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rating),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to create provider quality rating');
+    return payload?.rating as ProviderQualityRating;
+  },
+
+  async updateProviderQualityRating(id: string, updates: Partial<ProviderQualityRating>) {
+    const response = await fetch(`/api/admin/provider-quality-ratings/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.message || 'Failed to update provider quality rating');
+    return payload?.rating as ProviderQualityRating;
   },
 };

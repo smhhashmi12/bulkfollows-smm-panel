@@ -107,4 +107,40 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/services/:id
+// Fetch a single active service by id
+router.get('/:id', async (req, res) => {
+  try {
+    if (!supabaseConfigured || !supabase) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    const serviceId = String(req.params.id || '').trim();
+    if (!serviceId) {
+      return res.status(400).json({ error: 'Missing service id' });
+    }
+
+    const { data, error } = await supabase
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Public Services] Service detail error:', error);
+      return res.status(500).json({ error: error.message || 'Failed to load service' });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Service not found' });
+    }
+
+    return res.json({ service: data });
+  } catch (err) {
+    console.error('[Public Services] Service detail error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

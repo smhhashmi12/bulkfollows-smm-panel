@@ -187,7 +187,7 @@ const ServicesPage: React.FC = () => {
     const loadServices = async () => {
       setLoading(true);
       try {
-        const services = await withTimeout(servicesAPI.getMergedServices(), 8000, [], 'services directory');
+        const services = await withTimeout(servicesAPI.getMergedServices(), 20000, [], 'services directory');
         setAllServices(services);
       } finally {
         setLoading(false);

@@ -180,9 +180,11 @@ const SupportPage: React.FC = () => {
             <h3 className="text-lg font-bold mb-4">Create New Support Ticket</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Subject</label>
+                <label htmlFor="support-subject" className="block text-sm font-medium text-gray-300 mb-2">Subject</label>
                 <input
                   type="text"
+                  id="support-subject"
+                  name="supportSubject"
                   value={newSubject}
                   onChange={(e) => setNewSubject(e.target.value)}
                   placeholder="Brief description of your issue"
@@ -190,8 +192,10 @@ const SupportPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Message</label>
+                <label htmlFor="support-message" className="block text-sm font-medium text-gray-300 mb-2">Message</label>
                 <textarea
+                  id="support-message"
+                  name="supportMessage"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="Describe your issue in detail..."

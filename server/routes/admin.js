@@ -6,6 +6,7 @@ import {
   supabaseAdminConfigured,
 } from '../lib/supabaseServer.js';
 import { AUTH_COOKIE_NAMES } from '../lib/authCookies.js';
+import { invalidateProviderServicesCache } from './integrations.js';
 
 const router = express.Router();
 const MAX_DECIMAL_10_2 = 99999999.99;
@@ -81,6 +82,195 @@ const limitText = (value, maxLength = 240) => {
 const getEmbeddedObject = (value) => {
   if (!value) return null;
   return Array.isArray(value) ? value[0] || null : value;
+};
+
+const toBoolean = (value, fallback = false) => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  return fallback;
+};
+
+const normalizeMarginType = (value) => {
+  const normalized = String(value || 'percent').trim().toLowerCase();
+  return normalized === 'fixed' ? 'fixed' : 'percent';
+};
+
+const normalizeMarginRuleInput = (input) => ({
+  provider_id: input.provider_id ? String(input.provider_id).trim() : null,
+  service_id: input.service_id ? String(input.service_id).trim() : null,
+  category: input.category ? String(input.category).trim() : null,
+  margin_type: normalizeMarginType(input.margin_type),
+  margin_value: clampDecimal10_2(input.margin_value ?? 0, 0),
+  min_margin: input.min_margin !== undefined && input.min_margin !== null ? clampDecimal10_2(input.min_margin, 0) : null,
+  max_margin: input.max_margin !== undefined && input.max_margin !== null ? clampDecimal10_2(input.max_margin, 0) : null,
+  active: toBoolean(input.active, true),
+  priority: toInteger(input.priority, 100),
+  effective_from: input.effective_from ? new Date(input.effective_from).toISOString() : undefined,
+  effective_to: input.effective_to ? new Date(input.effective_to).toISOString() : undefined,
+});
+
+const parseCsvText = (text) => {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return [];
+
+  const normalizeCell = (value) => {
+    let out = String(value || '').trim();
+    if (out.startsWith('"') && out.endsWith('"')) {
+      out = out.slice(1, -1);
+    }
+    return out.trim();
+  };
+
+  const header = lines[0]
+    .split(',')
+    .map((cell) => normalizeCell(cell).toLowerCase());
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = lines[i].split(',').map(normalizeCell);
+    const row = {};
+    header.forEach((key, index) => {
+      row[key] = cols[index];
+    });
+    rows.push(row);
+  }
+
+  return rows;
+};
+
+const isRuleActive = (rule) => {
+  if (!rule?.active) return false;
+  const now = Date.now();
+  const from = rule.effective_from ? new Date(rule.effective_from).getTime() : now;
+  const to = rule.effective_to ? new Date(rule.effective_to).getTime() : null;
+  return from <= now && (!to || to >= now);
+};
+
+const selectBestRule = (rules, serviceId, category, providerId) => {
+  const normalizedServiceId = String(serviceId || '').trim();
+  const normalizedProviderId = String(providerId || '').trim();
+  const normalizedCategory = String(category || '').trim();
+
+  const candidates = (rules || []).filter((rule) => {
+    if (!isRuleActive(rule)) return false;
+    if (rule.provider_id && normalizedProviderId && String(rule.provider_id) !== normalizedProviderId) return false;
+    if (rule.provider_id && !normalizedProviderId) return false;
+    if (rule.service_id && normalizedServiceId && String(rule.service_id) !== normalizedServiceId) return false;
+    if (rule.category && normalizedCategory && String(rule.category) !== normalizedCategory) return false;
+    if (rule.service_id && !normalizedServiceId) return false;
+    if (rule.category && !normalizedCategory) return false;
+    return true;
+  });
+
+  if (candidates.length === 0) return null;
+
+  const scoreRule = (rule) => {
+    const scopeRank = rule.service_id ? 1 : rule.category ? 2 : rule.provider_id ? 3 : 4;
+    return [scopeRank, Number(rule.priority || 100)];
+  };
+
+  return candidates.sort((a, b) => {
+    const [aScope, aPriority] = scoreRule(a);
+    const [bScope, bPriority] = scoreRule(b);
+    if (aScope !== bScope) return aScope - bScope;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
+  })[0];
+};
+
+const applyMarginToRate = (providerRate, rule) => {
+  const rate = Number(providerRate || 0);
+  if (!rule) return rate;
+
+  let marginValue = Number(rule.margin_value || 0);
+  if (rule.min_margin !== null && rule.min_margin !== undefined) {
+    marginValue = Math.max(marginValue, Number(rule.min_margin));
+  }
+  if (rule.max_margin !== null && rule.max_margin !== undefined) {
+    marginValue = Math.min(marginValue, Number(rule.max_margin));
+  }
+
+  if (rule.margin_type === 'fixed') {
+    return Number((rate + marginValue).toFixed(4));
+  }
+
+  return Number((rate * (1 + marginValue / 100)).toFixed(4));
+};
+
+const computeMarginPercent = (providerRate, ourRate) => {
+  const base = Number(providerRate || 0);
+  const sell = Number(ourRate || 0);
+  if (!base) return 0;
+  return Number((((sell - base) / base) * 100).toFixed(2));
+};
+
+const extractProviderServiceIdFromDescription = (description) => {
+  const text = String(description || '');
+  const match = text.match(/Provider Service ID:\s*([^|]+)/i);
+  return match ? String(match[1]).trim() : '';
+};
+
+const recomputeProviderServiceRates = async ({ providerId = null } = {}) => {
+  const baseQuery = supabaseAdmin
+    .from('provider_services')
+    .select('id, provider_id, service_id, provider_rate, our_rate');
+  if (providerId) baseQuery.eq('provider_id', providerId);
+
+  const { data: mappings, error } = await baseQuery;
+  if (error) throw error;
+
+  if (!mappings || mappings.length === 0) {
+    return { updated: 0 };
+  }
+
+  const serviceIds = Array.from(new Set(mappings.map((row) => row.service_id).filter(Boolean)));
+  const { data: servicesData } = await supabaseAdmin
+    .from('services')
+    .select('id, category')
+    .in('id', serviceIds);
+
+  const categoryByServiceId = new Map(
+    (servicesData || []).map((svc) => [String(svc.id), svc.category])
+  );
+
+  const rulesQuery = supabaseAdmin.from('provider_margin_rules').select('*');
+  if (providerId) rulesQuery.or(`provider_id.eq.${providerId},provider_id.is.null`);
+  const { data: rulesData, error: rulesError } = await rulesQuery;
+  if (rulesError) throw rulesError;
+
+  const rules = rulesData || [];
+  const updates = [];
+
+  mappings.forEach((mapping) => {
+    const category = categoryByServiceId.get(String(mapping.service_id || '')) || null;
+    const rule = selectBestRule(rules, mapping.service_id, category, mapping.provider_id);
+    if (!rule) return;
+
+    const nextRate = applyMarginToRate(mapping.provider_rate, rule);
+    if (Number(mapping.our_rate || 0) === nextRate) return;
+
+    updates.push({ id: mapping.id, our_rate: nextRate, updated_at: new Date().toISOString() });
+  });
+
+  if (updates.length === 0) return { updated: 0 };
+
+  const CHUNK = 500;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const chunk = updates.slice(i, i + CHUNK);
+    const { error: updateError } = await supabaseAdmin
+      .from('provider_services')
+      .upsert(chunk, { onConflict: 'id', defaultToNull: false });
+    if (updateError) throw updateError;
+  }
+
+  return { updated: updates.length };
 };
 
 const getSupabaseServerError = (error, fallbackMessage = 'Internal server error') => {
@@ -332,8 +522,9 @@ router.post('/sync-provider-services', async (req, res) => {
       });
     }
 
-    const { provider_id, markup_percent } = req.body;
+    const { provider_id, markup_percent, categories, category, replace_existing } = req.body;
     const markupPercent = toNumber(markup_percent, 0);
+    const shouldReplaceExisting = replace_existing !== undefined ? Boolean(replace_existing) : true;
 
     if (!provider_id) {
       return res.status(400).json({
@@ -426,8 +617,43 @@ router.post('/sync-provider-services', async (req, res) => {
       });
     }
 
+    const rawCategoryFilter = Array.isArray(categories) ? categories : String(category || '')
+      .split(',')
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    const normalizedCategoryFilter = rawCategoryFilter.map((value) => value.toLowerCase());
+
+    if (normalizedCategoryFilter.length > 0) {
+      services = services.filter((svc) => {
+        const svcCategory = sanitizeUnicode(pickFirst(svc.category, svc.group, svc.service_type, ''))
+          .toLowerCase();
+        if (!svcCategory) return false;
+        return normalizedCategoryFilter.some((needle) => svcCategory.includes(needle));
+      });
+      console.log('[sync-services] Category filter applied:', {
+        providerId: provider_id,
+        requested: normalizedCategoryFilter,
+        remaining: services.length,
+      });
+    }
+
     let clampedRateCount = 0;
     let clampedQuantityCount = 0;
+
+    let providerDefaultRule = null;
+    try {
+      const { data: ruleData } = await supabaseAdmin
+        .from('provider_margin_rules')
+        .select('margin_type, margin_value, min_margin, max_margin, active')
+        .eq('provider_id', provider_id)
+        .is('service_id', null)
+        .eq('active', true)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      providerDefaultRule = Array.isArray(ruleData) ? ruleData[0] : ruleData;
+    } catch (ruleError) {
+      console.warn('[sync-services] Failed to load provider margin rules, falling back to markup_percent.', ruleError);
+    }
 
     const normalizedServices = services.map((svc, index) => {
       const providerServiceId = sanitizeUnicode(pickFirst(svc.service, svc.id, `unknown_${index}`)) || `unknown_${index}`;
@@ -451,7 +677,15 @@ router.post('/sync-provider-services', async (req, res) => {
       const rawMinQuantity = toInteger(pickFirst(svc.min, svc.min_quantity), 1);
       const rawMaxQuantity = toInteger(pickFirst(svc.max, svc.max_quantity), 10000);
       const providerRate = clampDecimal10_2(rawProviderRate, 0);
-      const ourRate = clampDecimal10_2(providerRate * (1 + markupPercent / 100), providerRate);
+      const effectiveMarkup = providerDefaultRule
+        ? applyMarginToRate(providerRate, {
+            margin_type: providerDefaultRule.margin_type,
+            margin_value: providerDefaultRule.margin_value,
+            min_margin: providerDefaultRule.min_margin,
+            max_margin: providerDefaultRule.max_margin,
+          })
+        : providerRate * (1 + markupPercent / 100);
+      const ourRate = clampDecimal10_2(effectiveMarkup, providerRate);
       const minQuantity = clampQuantity(rawMinQuantity, 1);
       const maxQuantity = clampQuantity(rawMaxQuantity, Math.max(minQuantity, 10000));
 
@@ -500,10 +734,12 @@ router.post('/sync-provider-services', async (req, res) => {
     let serviceIdByName = new Map();
 
     // Mark prior synced services for this provider as inactive so old names don't linger.
-    await supabaseAdmin
-      .from('services')
-      .update({ status: 'inactive', updated_at: new Date().toISOString() })
-      .ilike('description', `%Provider ID: ${provider_id}%`);
+    if (shouldReplaceExisting) {
+      await supabaseAdmin
+        .from('services')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .ilike('description', `%Provider ID: ${provider_id}%`);
+    }
 
     // Avoid Postgres "ON CONFLICT DO UPDATE command cannot affect row a second time"
     // by deduping same-name rows inside each upsert batch.
@@ -674,12 +910,14 @@ router.post('/sync-provider-services', async (req, res) => {
     });
     const dedupedMappings = Array.from(uniqueMappingMap.values());
 
-    const { error: deleteError } = await supabaseAdmin
-      .from('provider_services')
-      .delete()
-      .eq('provider_id', provider_id);
-    if (deleteError) {
-      console.warn('[sync-services] Failed to clear old mappings:', deleteError);
+    if (shouldReplaceExisting) {
+      const { error: deleteError } = await supabaseAdmin
+        .from('provider_services')
+        .delete()
+        .eq('provider_id', provider_id);
+      if (deleteError) {
+        console.warn('[sync-services] Failed to clear old mappings:', deleteError);
+      }
     }
 
     if (dedupedMappings.length === 0) {
@@ -716,6 +954,7 @@ router.post('/sync-provider-services', async (req, res) => {
 
     console.log('[sync-services] Successfully synced', dedupedMappings.length, 'services');
 
+    invalidateProviderServicesCache();
     return res.status(200).json({
       success: true,
       count: dedupedMappings.length,
@@ -973,6 +1212,116 @@ router.patch('/provider-services/:id', async (req, res) => {
   }
 });
 
+// POST /api/admin/provider-services/filter-categories
+// Keep only selected categories for a provider, delete the rest
+router.post('/provider-services/filter-categories', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({
+        success: false,
+        message: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.',
+      });
+    }
+
+    const { provider_id, categories, category, replace_existing } = req.body || {};
+    if (!provider_id) {
+      return res.status(400).json({ success: false, message: 'Missing provider_id' });
+    }
+
+    const rawCategoryFilter = Array.isArray(categories) ? categories : String(category || '')
+      .split(',')
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    const normalizedCategoryFilter = rawCategoryFilter.map((value) => value.toLowerCase());
+    if (normalizedCategoryFilter.length === 0) {
+      return res.status(400).json({ success: false, message: 'Provide at least one category to keep.' });
+    }
+
+    const { data: providerServices, error: providerServicesError } = await supabaseAdmin
+      .from('provider_services')
+      .select('id, provider_id, service_id, provider_service_id')
+      .eq('provider_id', provider_id);
+
+    if (providerServicesError) {
+      const serverError = getSupabaseServerError(providerServicesError, 'Failed to load provider services');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    if (!providerServices || providerServices.length === 0) {
+      return res.status(200).json({ success: true, removed: 0, kept: 0, message: 'No provider services found.' });
+    }
+
+    const serviceIds = Array.from(new Set(providerServices.map((row) => row.service_id).filter(Boolean)));
+    if (serviceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provider services are not linked to catalog services yet. Sync services first.',
+      });
+    }
+
+    const { data: servicesData, error: servicesError } = await supabaseAdmin
+      .from('services')
+      .select('id, category, description')
+      .in('id', serviceIds);
+
+    if (servicesError) {
+      const serverError = getSupabaseServerError(servicesError, 'Failed to load services for category filtering');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const serviceById = new Map((servicesData || []).map((svc) => [String(svc.id), svc]));
+    const serviceByProviderServiceId = new Map();
+    (servicesData || []).forEach((svc) => {
+      const providerServiceId = extractProviderServiceIdFromDescription(svc.description);
+      if (providerServiceId && !serviceByProviderServiceId.has(providerServiceId)) {
+        serviceByProviderServiceId.set(providerServiceId, svc);
+      }
+    });
+
+    const shouldKeep = (row) => {
+      const byId = row.service_id ? serviceById.get(String(row.service_id)) : null;
+      const byProviderServiceId = serviceByProviderServiceId.get(String(row.provider_service_id || '').trim()) || null;
+      const categoryValue = String(byId?.category || byProviderServiceId?.category || '').toLowerCase();
+      if (!categoryValue) return false;
+      return normalizedCategoryFilter.some((needle) => categoryValue.includes(needle));
+    };
+
+    const toRemove = (providerServices || []).filter((row) => !shouldKeep(row));
+    const toKeep = (providerServices || []).filter((row) => shouldKeep(row));
+
+    if (toRemove.length === 0) {
+      return res.status(200).json({ success: true, removed: 0, kept: toKeep.length });
+    }
+
+    const removeIds = toRemove.map((row) => row.id);
+    const { error: deleteError } = await supabaseAdmin
+      .from('provider_services')
+      .delete()
+      .in('id', removeIds);
+
+    if (deleteError) {
+      const serverError = getSupabaseServerError(deleteError, 'Failed to delete provider services');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const serviceIdsToDisable = Array.from(
+      new Set(toRemove.map((row) => row.service_id).filter(Boolean))
+    );
+    if (serviceIdsToDisable.length > 0 && replace_existing !== false) {
+      await supabaseAdmin
+        .from('services')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .in('id', serviceIdsToDisable);
+    }
+
+    invalidateProviderServicesCache();
+    return res.status(200).json({ success: true, removed: toRemove.length, kept: toKeep.length });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error, 'Failed to filter provider services');
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
 router.get('/settings', async (req, res) => {
   try {
     if (!supabaseAdminConfigured || !supabaseAdmin) {
@@ -1043,6 +1392,771 @@ router.post('/settings', async (req, res) => {
   } catch (error) {
     console.error('[settings] save error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Margin Rules CRUD
+router.get('/margin-rules', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { provider_id, service_id, category, active } = req.query;
+    let query = supabaseAdmin
+      .from('provider_margin_rules')
+      .select('*')
+      .order('priority', { ascending: true })
+      .order('updated_at', { ascending: false });
+
+    if (provider_id) query = query.eq('provider_id', provider_id);
+    if (service_id) query = query.eq('service_id', service_id);
+    if (category) query = query.eq('category', category);
+    if (active !== undefined) query = query.eq('active', toBoolean(active, true));
+
+    const { data, error } = await query;
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load margin rules');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, rules: data || [] });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.post('/margin-rules', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const rule = normalizeMarginRuleInput(req.body || {});
+    const { data, error } = await supabaseAdmin
+      .from('provider_margin_rules')
+      .insert({ ...rule, updated_at: new Date().toISOString() })
+      .select('*')
+      .single();
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to create margin rule');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(201).json({ success: true, rule: data });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.patch('/margin-rules/:id', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const updates = normalizeMarginRuleInput(req.body || {});
+    const { data, error } = await supabaseAdmin
+      .from('provider_margin_rules')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to update margin rule');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, rule: data });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.delete('/margin-rules/:id', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('provider_margin_rules')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to delete margin rule');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(204).send();
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.post('/margin-rules/bulk-preview', async (req, res) => {
+  try {
+    const { csv, rows } = req.body || {};
+    const parsedRows = Array.isArray(rows) ? rows : parseCsvText(csv);
+    const normalized = parsedRows.map(normalizeMarginRuleInput);
+
+    return res.status(200).json({ success: true, rows: normalized });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message || 'Invalid CSV payload' });
+  }
+});
+
+router.post('/margin-rules/bulk-apply', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { csv, rows, provider_id, source, notes } = req.body || {};
+    const parsedRows = Array.isArray(rows) ? rows : parseCsvText(csv);
+    const normalized = parsedRows.map((row) =>
+      normalizeMarginRuleInput({ ...row, provider_id: row.provider_id || provider_id })
+    );
+
+    if (normalized.length === 0) {
+      return res.status(400).json({ success: false, message: 'No margin rules supplied' });
+    }
+
+    const { data: version, error: versionError } = await supabaseAdmin
+      .from('provider_margin_versions')
+      .insert({
+        provider_id: provider_id || null,
+        source: source || (csv ? 'csv' : 'manual'),
+        notes: notes || null,
+      })
+      .select('*')
+      .single();
+
+    if (versionError || !version) {
+      const serverError = getSupabaseServerError(versionError, 'Failed to create margin version');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const insertChunks = [];
+    const CHUNK = 500;
+    for (let i = 0; i < normalized.length; i += CHUNK) {
+      insertChunks.push(normalized.slice(i, i + CHUNK));
+    }
+
+    for (const chunk of insertChunks) {
+      const { error } = await supabaseAdmin
+        .from('provider_margin_rules')
+        .insert(chunk.map((rule) => ({ ...rule, updated_at: new Date().toISOString() })));
+      if (error) {
+        const serverError = getSupabaseServerError(error, 'Failed to insert margin rules');
+        return res.status(serverError.status).json({ success: false, message: serverError.message });
+      }
+    }
+
+    const serviceIds = Array.from(
+      new Set(
+        normalized
+          .map((row) => row.service_id)
+          .filter((value) => Boolean(value))
+      )
+    );
+
+    let providerServices = [];
+    if (serviceIds.length > 0) {
+      let psQuery = supabaseAdmin
+        .from('provider_services')
+        .select('id, provider_id, service_id, provider_rate, our_rate');
+      if (provider_id) psQuery = psQuery.eq('provider_id', provider_id);
+      psQuery = psQuery.in('service_id', serviceIds);
+      const { data: psData } = await psQuery;
+      providerServices = psData || [];
+    }
+
+    const versionItems = normalized.map((rule) => {
+      const mapping = providerServices.find((ps) =>
+        String(ps.service_id || '') === String(rule.service_id || '') &&
+        (!rule.provider_id || String(ps.provider_id || '') === String(rule.provider_id))
+      );
+
+      return {
+        version_id: version.id,
+        provider_service_id: '',
+        service_id: rule.service_id || null,
+        old_margin_type: 'percent',
+        old_margin_value: computeMarginPercent(mapping?.provider_rate, mapping?.our_rate) || 0,
+        new_margin_type: rule.margin_type,
+        new_margin_value: rule.margin_value,
+      };
+    });
+
+    if (versionItems.length > 0) {
+      for (let i = 0; i < versionItems.length; i += CHUNK) {
+        const chunk = versionItems.slice(i, i + CHUNK);
+        await supabaseAdmin.from('provider_margin_version_items').insert(chunk);
+      }
+    }
+
+    const recompute = await recomputeProviderServiceRates({ providerId: provider_id || null });
+
+    return res.status(200).json({
+      success: true,
+      version,
+      applied: normalized.length,
+      recomputed: recompute.updated,
+    });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error, 'Failed to apply margin rules');
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+// Provider-wise margin apply/reset (simple mode)
+router.post('/provider-margins/apply', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { provider_id, margin_type, margin_value } = req.body || {};
+    if (!provider_id) {
+      return res.status(400).json({ success: false, message: 'Missing provider_id' });
+    }
+
+    const normalizedType = normalizeMarginType(margin_type);
+    const normalizedValue = clampDecimal10_2(margin_value ?? 0, 0);
+
+    await supabaseAdmin
+      .from('provider_margin_rules')
+      .delete()
+      .eq('provider_id', provider_id);
+
+    const { data: mappings, error: mappingsError } = await supabaseAdmin
+      .from('provider_services')
+      .select('id, provider_id, service_id, provider_rate')
+      .eq('provider_id', provider_id);
+
+    if (mappingsError) {
+      const serverError = getSupabaseServerError(mappingsError, 'Failed to load provider services');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const rules = (mappings || [])
+      .filter((row) => row.service_id)
+      .map((row) => ({
+        provider_id,
+        service_id: row.service_id,
+        margin_type: normalizedType,
+        margin_value: normalizedValue,
+        active: true,
+        priority: 100,
+        updated_at: new Date().toISOString(),
+      }));
+
+    // Also store a provider-default rule so newly synced services inherit it.
+    const defaultRule = {
+      provider_id,
+      service_id: null,
+      category: null,
+      margin_type: normalizedType,
+      margin_value: normalizedValue,
+      active: true,
+      priority: 100,
+      updated_at: new Date().toISOString(),
+    };
+
+    const allRules = [defaultRule, ...rules];
+    if (allRules.length > 0) {
+      const CHUNK = 500;
+      for (let i = 0; i < allRules.length; i += CHUNK) {
+        const chunk = allRules.slice(i, i + CHUNK);
+        const { error } = await supabaseAdmin.from('provider_margin_rules').insert(chunk);
+        if (error) {
+          const serverError = getSupabaseServerError(error, 'Failed to insert provider margin rules');
+          return res.status(serverError.status).json({ success: false, message: serverError.message });
+        }
+      }
+    }
+
+    const updates = (mappings || []).map((row) => {
+      const providerRate = Number(row.provider_rate || 0);
+      const ourRate = normalizedType === 'fixed'
+        ? Number((providerRate + normalizedValue).toFixed(4))
+        : Number((providerRate * (1 + normalizedValue / 100)).toFixed(4));
+      return {
+        id: row.id,
+        our_rate: ourRate,
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+      const chunk = updates.slice(i, i + CHUNK_SIZE);
+      const { error } = await supabaseAdmin
+        .from('provider_services')
+        .upsert(chunk, { onConflict: 'id', defaultToNull: false });
+      if (error) {
+        const serverError = getSupabaseServerError(error, 'Failed to update provider rates');
+        return res.status(serverError.status).json({ success: false, message: serverError.message });
+      }
+    }
+
+    invalidateProviderServicesCache();
+    return res.status(200).json({
+      success: true,
+      applied: rules.length,
+      recomputed: updates.length,
+    });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error, 'Failed to apply provider margin');
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.post('/provider-margins/reset', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { provider_id } = req.body || {};
+    if (!provider_id) {
+      return res.status(400).json({ success: false, message: 'Missing provider_id' });
+    }
+
+    await supabaseAdmin
+      .from('provider_margin_rules')
+      .delete()
+      .eq('provider_id', provider_id);
+
+    const { data: mappings, error: mappingsError } = await supabaseAdmin
+      .from('provider_services')
+      .select('id, provider_rate')
+      .eq('provider_id', provider_id);
+
+    if (mappingsError) {
+      const serverError = getSupabaseServerError(mappingsError, 'Failed to load provider services');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const updates = (mappings || []).map((row) => ({
+      id: row.id,
+      our_rate: Number(row.provider_rate || 0),
+      updated_at: new Date().toISOString(),
+    }));
+
+    const CHUNK = 500;
+    for (let i = 0; i < updates.length; i += CHUNK) {
+      const chunk = updates.slice(i, i + CHUNK);
+      const { error } = await supabaseAdmin
+        .from('provider_services')
+        .upsert(chunk, { onConflict: 'id', defaultToNull: false });
+      if (error) {
+        const serverError = getSupabaseServerError(error, 'Failed to reset provider rates');
+        return res.status(serverError.status).json({ success: false, message: serverError.message });
+      }
+    }
+
+    invalidateProviderServicesCache();
+    return res.status(200).json({ success: true, reset: updates.length });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error, 'Failed to reset provider margins');
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.get('/margin-versions', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { provider_id } = req.query;
+    let query = supabaseAdmin
+      .from('provider_margin_versions')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (provider_id) query = query.eq('provider_id', provider_id);
+
+    const { data, error } = await query;
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load margin versions');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, versions: data || [] });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.post('/margin-versions/:id/rollback', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const versionId = req.params.id;
+    const { data: items, error } = await supabaseAdmin
+      .from('provider_margin_version_items')
+      .select('*')
+      .eq('version_id', versionId);
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load margin version items');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const rulesToRestore = (items || []).map((item) => ({
+      provider_id: null,
+      service_id: item.service_id || null,
+      category: null,
+      margin_type: normalizeMarginType(item.old_margin_type),
+      margin_value: clampDecimal10_2(item.old_margin_value ?? 0, 0),
+      active: true,
+      priority: 100,
+      updated_at: new Date().toISOString(),
+    }));
+
+    if (rulesToRestore.length > 0) {
+      await supabaseAdmin.from('provider_margin_rules').insert(rulesToRestore);
+    }
+
+    const recompute = await recomputeProviderServiceRates({});
+
+    return res.status(200).json({ success: true, restored: rulesToRestore.length, recomputed: recompute.updated });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error, 'Failed to rollback margin version');
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.get('/margin-analysis', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { provider_id } = req.query;
+    let query = supabaseAdmin
+      .from('provider_services')
+      .select('provider_id, provider_rate, our_rate');
+    if (provider_id) query = query.eq('provider_id', provider_id);
+
+    const { data, error } = await query;
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load provider services for analysis');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const rows = data || [];
+    const buckets = [
+      { label: '0-10%', min: 0, max: 10, count: 0 },
+      { label: '10-20%', min: 10, max: 20, count: 0 },
+      { label: '20-50%', min: 20, max: 50, count: 0 },
+      { label: '50-100%', min: 50, max: 100, count: 0 },
+      { label: '100%+', min: 100, max: Infinity, count: 0 },
+    ];
+
+    let totalMarginPercent = 0;
+    let totalMarginAmount = 0;
+    const byProvider = new Map();
+
+    rows.forEach((row) => {
+      const providerId = String(row.provider_id || '');
+      const percent = computeMarginPercent(row.provider_rate, row.our_rate);
+      const amount = Number(row.our_rate || 0) - Number(row.provider_rate || 0);
+
+      totalMarginPercent += percent;
+      totalMarginAmount += amount;
+
+      const providerEntry = byProvider.get(providerId) || {
+        provider_id: providerId,
+        count: 0,
+        avg_margin_percent: 0,
+        avg_margin_amount: 0,
+      };
+      providerEntry.count += 1;
+      providerEntry.avg_margin_percent += percent;
+      providerEntry.avg_margin_amount += amount;
+      byProvider.set(providerId, providerEntry);
+
+      const bucket = buckets.find((b) => percent >= b.min && percent < b.max);
+      if (bucket) bucket.count += 1;
+    });
+
+    const providerStats = Array.from(byProvider.values()).map((entry) => ({
+      ...entry,
+      avg_margin_percent: entry.count ? Number((entry.avg_margin_percent / entry.count).toFixed(2)) : 0,
+      avg_margin_amount: entry.count ? Number((entry.avg_margin_amount / entry.count).toFixed(4)) : 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      total_services: rows.length,
+      avg_margin_percent: rows.length ? Number((totalMarginPercent / rows.length).toFixed(2)) : 0,
+      avg_margin_amount: rows.length ? Number((totalMarginAmount / rows.length).toFixed(4)) : 0,
+      distribution: buckets,
+      providers: providerStats,
+    });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.get('/service-comparison', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { service_id, limit, sort } = req.query;
+    if (!service_id) {
+      return res.status(400).json({ success: false, message: 'Missing service_id' });
+    }
+
+    const { data: mappings, error } = await supabaseAdmin
+      .from('provider_services')
+      .select(`
+        id,
+        provider_id,
+        service_id,
+        provider_rate,
+        our_rate,
+        min_quantity,
+        max_quantity,
+        providers:provider_id ( id, name )
+      `)
+      .eq('service_id', service_id);
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load provider services');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    const normalized = (mappings || []).map((row) => ({
+      ...row,
+      providers: getEmbeddedObject(row.providers),
+      margin_percent: computeMarginPercent(row.provider_rate, row.our_rate),
+    }));
+
+    const providerIds = Array.from(new Set(normalized.map((row) => row.provider_id)));
+    const { data: qualityRows } = await supabaseAdmin
+      .from('provider_quality_ratings')
+      .select('provider_id, quality_score')
+      .in('provider_id', providerIds);
+
+    const qualityByProvider = new Map(
+      (qualityRows || []).map((row) => [String(row.provider_id), row.quality_score])
+    );
+
+    const enhanced = normalized.map((row) => ({
+      ...row,
+      quality_score: qualityByProvider.get(String(row.provider_id)) || 3,
+    }));
+
+    const sorted = enhanced.sort((a, b) => {
+      switch (sort) {
+        case 'quality':
+          return b.quality_score - a.quality_score;
+        case 'margin':
+          return b.margin_percent - a.margin_percent;
+        case 'cost':
+        default:
+          return Number(a.provider_rate || 0) - Number(b.provider_rate || 0);
+      }
+    });
+
+    const maxRows = Math.min(Number(limit || 5), 5);
+    const selected = sorted.slice(0, maxRows);
+
+    const bestValue = selected.reduce((best, row) => {
+      if (!best) return row;
+      const score = row.quality_score / Math.max(0.0001, Number(row.provider_rate || 0));
+      const bestScore = best.quality_score / Math.max(0.0001, Number(best.provider_rate || 0));
+      return score > bestScore ? row : best;
+    }, null);
+
+    const bestQuality = selected.reduce((best, row) => {
+      if (!best) return row;
+      return row.quality_score > best.quality_score ? row : best;
+    }, null);
+
+    const recommended = selected.reduce((best, row) => {
+      if (!best) return row;
+      const score = row.quality_score * 0.6 - Number(row.provider_rate || 0) * 0.4;
+      const bestScore = best.quality_score * 0.6 - Number(best.provider_rate || 0) * 0.4;
+      return score > bestScore ? row : best;
+    }, null);
+
+    const { data: competitors } = await supabaseAdmin
+      .from('competitor_prices')
+      .select('*')
+      .eq('service_id', service_id)
+      .order('captured_at', { ascending: false })
+      .limit(10);
+
+    return res.status(200).json({
+      success: true,
+      providers: selected,
+      best_value: bestValue,
+      best_quality: bestQuality,
+      recommended,
+      competitors: competitors || [],
+    });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.get('/competitor-prices', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { service_id } = req.query;
+    let query = supabaseAdmin.from('competitor_prices').select('*').order('captured_at', { ascending: false });
+    if (service_id) query = query.eq('service_id', service_id);
+
+    const { data, error } = await query;
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load competitor prices');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, prices: data || [] });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.post('/competitor-prices/bulk', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { rows } = req.body || {};
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, message: 'No competitor prices supplied' });
+    }
+
+    const normalized = rows.map((row) => ({
+      service_id: row.service_id || null,
+      provider_name: String(row.provider_name || '').trim(),
+      price_per_1000: clampDecimal10_2(row.price_per_1000 ?? 0, 0),
+      quality_score: toInteger(row.quality_score, 0),
+      delivery_time_hours: toInteger(row.delivery_time_hours, 0),
+      captured_at: row.captured_at ? new Date(row.captured_at).toISOString() : new Date().toISOString(),
+    }));
+
+    const { error } = await supabaseAdmin.from('competitor_prices').insert(normalized);
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to insert competitor prices');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, inserted: normalized.length });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.get('/provider-quality-ratings', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const { provider_id } = req.query;
+    let query = supabaseAdmin.from('provider_quality_ratings').select('*').order('updated_at', { ascending: false });
+    if (provider_id) query = query.eq('provider_id', provider_id);
+
+    const { data, error } = await query;
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to load provider quality ratings');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, ratings: data || [] });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.post('/provider-quality-ratings', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const payload = {
+      provider_id: req.body?.provider_id,
+      quality_score: toInteger(req.body?.quality_score, 3),
+      notes: req.body?.notes || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('provider_quality_ratings')
+      .insert(payload)
+      .select('*')
+      .single();
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to create provider quality rating');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(201).json({ success: true, rating: data });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
+  }
+});
+
+router.patch('/provider-quality-ratings/:id', async (req, res) => {
+  try {
+    if (!supabaseAdminConfigured || !supabaseAdmin) {
+      return res.status(503).json({ error: 'SUPABASE_SERVICE_ROLE_KEY is missing on the server.' });
+    }
+
+    const updates = {
+      quality_score: req.body?.quality_score !== undefined ? toInteger(req.body?.quality_score, 3) : undefined,
+      notes: req.body?.notes !== undefined ? req.body?.notes : undefined,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('provider_quality_ratings')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      const serverError = getSupabaseServerError(error, 'Failed to update provider quality rating');
+      return res.status(serverError.status).json({ success: false, message: serverError.message });
+    }
+
+    return res.status(200).json({ success: true, rating: data });
+  } catch (error) {
+    const serverError = getSupabaseServerError(error);
+    return res.status(serverError.status).json({ success: false, message: serverError.message });
   }
 });
 

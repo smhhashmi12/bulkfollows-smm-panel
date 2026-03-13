@@ -62,6 +62,8 @@ const ProviderManagementPage: React.FC = () => {
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [syncCategories, setSyncCategories] = useState('');
+  const [replaceExisting, setReplaceExisting] = useState(true);
   const [formData, setFormData] = useState<ProviderFormData>({
     name: '',
     api_url: '',
@@ -195,7 +197,11 @@ const ProviderManagementPage: React.FC = () => {
       const { response, payload: result } = await fetchApiJson('/api/admin/sync-provider-services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider_id: provider.id }),
+        body: JSON.stringify({
+          provider_id: provider.id,
+          category: syncCategories.trim() ? syncCategories.trim() : undefined,
+          replace_existing: replaceExisting,
+        }),
       });
 
       if (!response.ok || !result.success) {
@@ -270,6 +276,31 @@ const ProviderManagementPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <div className="bg-brand-container border border-brand-border rounded-2xl p-4 space-y-3">
+        <h2 className="text-lg font-semibold">Provider Sync Options</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Categories</label>
+            <input
+              value={syncCategories}
+              onChange={(e) => setSyncCategories(e.target.value)}
+              placeholder="instagram, youtube, tiktok"
+              className="w-full bg-black/20 border border-brand-border rounded-lg p-2 text-sm"
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            <input
+              type="checkbox"
+              checked={replaceExisting}
+              onChange={(e) => setReplaceExisting(e.target.checked)}
+            />
+            <span className="text-sm text-gray-300">Replace old services on sync</span>
+          </div>
+          <div className="text-xs text-gray-400 flex items-end">
+            Leave categories empty to sync all services.
+          </div>
+        </div>
+      </div>
       {/* Header */}
       <div className="flex justify-end items-center">
         <button
@@ -388,9 +419,11 @@ const ProviderManagementPage: React.FC = () => {
             <div className="space-y-4 mb-6">
               {/* Provider Name */}
               <div>
-                <label className="block text-sm font-medium mb-2">Provider Name *</label>
+                <label htmlFor="provider-form-name" className="block text-sm font-medium mb-2">Provider Name *</label>
                 <input
                   type="text"
+                  id="provider-form-name"
+                  name="providerName"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="e.g., SMM King, Instant Followers"
@@ -400,9 +433,11 @@ const ProviderManagementPage: React.FC = () => {
 
               {/* API URL */}
               <div>
-                <label className="block text-sm font-medium mb-2">API URL *</label>
+                <label htmlFor="provider-form-api-url" className="block text-sm font-medium mb-2">API URL *</label>
                 <input
                   type="url"
+                  id="provider-form-api-url"
+                  name="providerApiUrl"
                   value={formData.api_url}
                   onChange={(e) => setFormData({ ...formData, api_url: e.target.value })}
                   placeholder="https://api.provider.com"
@@ -412,9 +447,11 @@ const ProviderManagementPage: React.FC = () => {
 
               {/* API Key */}
               <div>
-                <label className="block text-sm font-medium mb-2">API Key *</label>
+                <label htmlFor="provider-form-api-key" className="block text-sm font-medium mb-2">API Key *</label>
                 <input
                   type="password"
+                  id="provider-form-api-key"
+                  name="providerApiKey"
                   value={formData.api_key}
                   onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
                   placeholder="Your API key"
@@ -424,9 +461,11 @@ const ProviderManagementPage: React.FC = () => {
 
               {/* API Secret (Optional) */}
               <div>
-                <label className="block text-sm font-medium mb-2">API Secret (Optional)</label>
+                <label htmlFor="provider-form-api-secret" className="block text-sm font-medium mb-2">API Secret (Optional)</label>
                 <input
                   type="password"
+                  id="provider-form-api-secret"
+                  name="providerApiSecret"
                   value={formData.api_secret}
                   onChange={(e) => setFormData({ ...formData, api_secret: e.target.value })}
                   placeholder="Your API secret (if required)"

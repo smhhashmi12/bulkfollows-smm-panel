@@ -114,8 +114,10 @@ const SupportTicketsPage: React.FC = () => {
                     <div className="bg-brand-container border border-brand-border rounded-2xl p-6 mb-6">
                         <div className="flex flex-wrap gap-4 mb-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Filter by Status</label>
+                                <label htmlFor="support-filter-status" className="block text-sm font-medium text-gray-300 mb-2">Filter by Status</label>
                                 <select 
+                                    id="support-filter-status"
+                                    name="support-filter-status"
                                     value={filterStatus} 
                                     onChange={(e) => setFilterStatus(e.target.value)}
                                     className="bg-black/20 border border-brand-border rounded-lg p-2 text-sm focus:ring-2 focus:ring-brand-purple focus:outline-none"
@@ -128,8 +130,10 @@ const SupportTicketsPage: React.FC = () => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Filter by Priority</label>
+                                <label htmlFor="support-filter-priority" className="block text-sm font-medium text-gray-300 mb-2">Filter by Priority</label>
                                 <select 
+                                    id="support-filter-priority"
+                                    name="support-filter-priority"
                                     value={filterPriority} 
                                     onChange={(e) => setFilterPriority(e.target.value)}
                                     className="bg-black/20 border border-brand-border rounded-lg p-2 text-sm focus:ring-2 focus:ring-brand-purple focus:outline-none"

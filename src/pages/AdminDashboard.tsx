@@ -2,11 +2,12 @@ import React, { Suspense, lazy, useEffect, useState } from 'react';
 import Sidebar from '../components/admin/Sidebar';
 import AdminHeader from '../components/admin/Header';
 import { DashboardLayout } from '../design-system';
+import { ServerHealthBanner } from '../components/admin/ServerHealthBanner';
 const AdminDashboardPage = lazy(() => import('./admin/Dashboard'));
 const UserManagementPage = lazy(() => import('./admin/UserManagement'));
 const ServiceManagementPage = lazy(() => import('./admin/ServiceManagement'));
 const ProviderManagementPage = lazy(() => import('./admin/ProviderManagement'));
-const ProviderServiceManagementPage = lazy(() => import('./admin/ProviderServiceManagement'));
+const ProviderMarginManagerPage = lazy(() => import('./admin/ProviderMarginManager'));
 const SettingsPage = lazy(() => import('./admin/SettingsPanel'));
 const OrderManagementPage = lazy(() => import('./admin/OrderManagement'));
 const PaymentLogsPage = lazy(() => import('./admin/PaymentLogs'));
@@ -43,7 +44,7 @@ const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             case 'users': return <UserManagementPage />;
             case 'services': return <ServiceManagementPage />;
             case 'providers': return <ProviderManagementPage />;
-            case 'provider-services': return <ProviderServiceManagementPage />;
+            case 'provider-margins': return <ProviderMarginManagerPage />;
             case 'orders': return <OrderManagementPage />;
             case 'payments': return <PaymentLogsPage />;
             case 'support': return <SupportTicketsPage />;
@@ -63,9 +64,12 @@ const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             sidebar={<Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
             navbar={<AdminHeader onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />}
         >
-            <Suspense fallback={pageFallback}>
-                {renderPage()}
-            </Suspense>
+            <div className="space-y-4">
+                <ServerHealthBanner />
+                <Suspense fallback={pageFallback}>
+                    {renderPage()}
+                </Suspense>
+            </div>
         </DashboardLayout>
     );
 };

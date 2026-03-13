@@ -128,10 +128,12 @@ const ProviderPayoutsPage: React.FC = () => {
 
               {/* Provider Selection */}
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="payout-provider" className="block text-sm font-medium text-gray-300 mb-2">
                   Select Provider
                 </label>
                 <select
+                  id="payout-provider"
+                  name="payoutProvider"
                   value={selectedProvider}
                   onChange={(e) => setSelectedProvider(e.target.value)}
                   className="w-full px-3 py-2 border border-brand-border bg-black/20 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-purple"
@@ -147,11 +149,13 @@ const ProviderPayoutsPage: React.FC = () => {
 
               {/* Period From */}
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="payout-period-from" className="block text-sm font-medium text-gray-300 mb-2">
                   Period From
                 </label>
                 <input
                   type="date"
+                  id="payout-period-from"
+                  name="payoutPeriodFrom"
                   value={payoutForm.periodFrom}
                   onChange={(e) =>
                     setPayoutForm({ ...payoutForm, periodFrom: e.target.value })
@@ -162,11 +166,13 @@ const ProviderPayoutsPage: React.FC = () => {
 
               {/* Period To */}
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="payout-period-to" className="block text-sm font-medium text-gray-300 mb-2">
                   Period To
                 </label>
                 <input
                   type="date"
+                  id="payout-period-to"
+                  name="payoutPeriodTo"
                   value={payoutForm.periodTo}
                   onChange={(e) =>
                     setPayoutForm({ ...payoutForm, periodTo: e.target.value })
@@ -177,10 +183,12 @@ const ProviderPayoutsPage: React.FC = () => {
 
               {/* Payout Method */}
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="payout-method" className="block text-sm font-medium text-gray-300 mb-2">
                   Payout Method
                 </label>
                 <select
+                  id="payout-method"
+                  name="payoutMethod"
                   value={payoutForm.payoutMethod}
                   onChange={(e) =>
                     setPayoutForm({ ...payoutForm, payoutMethod: e.target.value })
@@ -196,10 +204,12 @@ const ProviderPayoutsPage: React.FC = () => {
 
               {/* Payout Account */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="payout-account" className="block text-sm font-medium text-gray-300 mb-2">
                   Account Details
                 </label>
                 <textarea
+                  id="payout-account"
+                  name="payoutAccount"
                   value={payoutForm.payoutAccount}
                   onChange={(e) =>
                     setPayoutForm({ ...payoutForm, payoutAccount: e.target.value })

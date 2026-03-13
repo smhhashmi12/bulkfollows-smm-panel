@@ -115,6 +115,8 @@ const OrderManagementPage: React.FC = () => {
           <div className="relative">
             <input
               type="text"
+              id="orders-search"
+              name="ordersSearch"
               placeholder="Search orders..."
               className="bg-brand-input border border-brand-border rounded-lg px-4 py-2 pl-10 w-full sm:w-64 text-white"
               value={searchQuery}
@@ -136,6 +138,8 @@ const OrderManagementPage: React.FC = () => {
             </svg>
           </div>
           <select
+            id="orders-status-filter"
+            name="ordersStatusFilter"
             className="bg-brand-input border border-brand-border rounded-lg px-4 py-2 text-white"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}

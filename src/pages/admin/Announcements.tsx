@@ -128,9 +128,11 @@ const AnnouncementsPage: React.FC = () => {
                     <h2 className="text-lg font-bold mb-4">{editingId ? 'Edit Announcement' : 'Create New Announcement'}</h2>
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Subject</label>
+                            <label htmlFor="announcement-subject" className="block text-sm font-medium text-gray-300 mb-2">Subject</label>
                             <input
                                 type="text"
+                                id="announcement-subject"
+                                name="announcementSubject"
                                 value={formData.subject}
                                 onChange={(e) => setFormData(prev => ({ ...prev, subject: e.target.value }))}
                                 placeholder="Announcement subject"
@@ -140,8 +142,10 @@ const AnnouncementsPage: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Message</label>
+                            <label htmlFor="announcement-message" className="block text-sm font-medium text-gray-300 mb-2">Message</label>
                             <textarea
+                                id="announcement-message"
+                                name="announcementMessage"
                                 value={formData.message}
                                 onChange={(e) => setFormData(prev => ({ ...prev, message: e.target.value }))}
                                 placeholder="Announcement message"
@@ -153,8 +157,10 @@ const AnnouncementsPage: React.FC = () => {
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Type</label>
+                                <label htmlFor="announcement-type" className="block text-sm font-medium text-gray-300 mb-2">Type</label>
                                 <select
+                                    id="announcement-type"
+                                    name="announcementType"
                                     value={formData.type}
                                     onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value as any }))}
                                     className="w-full bg-black/20 border border-brand-border rounded-lg p-3 focus:ring-2 focus:ring-brand-purple focus:outline-none"
@@ -165,8 +171,10 @@ const AnnouncementsPage: React.FC = () => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Status</label>
+                                <label htmlFor="announcement-status" className="block text-sm font-medium text-gray-300 mb-2">Status</label>
                                 <select
+                                    id="announcement-status"
+                                    name="announcementStatus"
                                     value={formData.status}
                                     onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value as any }))}
                                     className="w-full bg-black/20 border border-brand-border rounded-lg p-3 focus:ring-2 focus:ring-brand-purple focus:outline-none"

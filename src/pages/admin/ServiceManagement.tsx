@@ -27,17 +27,11 @@ type ProviderServiceRow = {
   } | null;
 };
 
-const PROVIDER_SERVICES_TIMEOUT_MS = 12000;
+const PROVIDER_SERVICES_TIMEOUT_MS = 20000;
 
 const ServiceManagementPage: React.FC = () => {
   // React Query hooks for services data
   const { data: servicesData = [], isLoading: servicesLoading, error: servicesError, status: servicesStatus } = useAdminServices();
-  console.log('ServiceManagement - React Query state:', { 
-    dataLength: servicesData?.length, 
-    isLoading: servicesLoading, 
-    error: servicesError, 
-    status: servicesStatus 
-  });
   const { mutate: updateSvc, isPending: updatePending } = useUpdateService();
   const { mutate: createSvc, isPending: createPending } = useCreateService();
   const { mutate: deleteSvc, isPending: deletePending } = useDeleteService();
@@ -57,6 +51,12 @@ const ServiceManagementPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [manageProviderId, setManageProviderId] = useState('all');
+  const [syncCategoriesInput, setSyncCategoriesInput] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [isSyncingProvider, setIsSyncingProvider] = useState(false);
+  const [isApplyingCategoryFilter, setIsApplyingCategoryFilter] = useState(false);
+  const [servicesTimeoutMessage, setServicesTimeoutMessage] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -70,7 +70,28 @@ const ServiceManagementPage: React.FC = () => {
 
   // Use services data from React Query instead of state
   const services = servicesData;
-  console.log('ServiceManagement - services data:', services?.length, servicesLoading);
+
+  useEffect(() => {
+    console.log('ServiceManagement - React Query state:', {
+      dataLength: servicesData?.length,
+      isLoading: servicesLoading,
+      error: servicesError,
+      status: servicesStatus,
+    });
+  }, [servicesData?.length, servicesLoading, servicesError, servicesStatus]);
+
+  useEffect(() => {
+    if (!servicesLoading) {
+      setServicesTimeoutMessage('');
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setServicesTimeoutMessage('Backend not reachable. Please ensure the server is running on port 4000.');
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, [servicesLoading]);
 
   const fetchProviderServices = async () => {
     const controller = new AbortController();
@@ -205,6 +226,14 @@ const ServiceManagementPage: React.FC = () => {
     return map;
   }, [providers]);
 
+  const serviceById = useMemo(() => {
+    const map = new Map<string, Service>();
+    (services || []).forEach((service) => {
+      map.set(String(service.id), service);
+    });
+    return map;
+  }, [services]);
+
   const providerServicesByServiceId = useMemo(() => {
     const map = new Map<string, ProviderServiceRow[]>();
     (providerServices || []).forEach((row) => {
@@ -226,6 +255,119 @@ const ServiceManagementPage: React.FC = () => {
       )
     ).sort((a, b) => a.localeCompare(b));
   }, [services]);
+
+  const providerCategories = useMemo(() => {
+    if (manageProviderId === 'all') return [];
+    const catSet = new Set<string>();
+    providerServices.forEach((row) => {
+      if (row.provider_id !== manageProviderId) return;
+      const svc = row.service_id ? serviceById.get(String(row.service_id)) : null;
+      const category = String(row.services?.category || svc?.category || '').trim();
+      if (category) catSet.add(category);
+    });
+    return Array.from(catSet).sort((a, b) => a.localeCompare(b));
+  }, [manageProviderId, providerServices, serviceById]);
+
+  useEffect(() => {
+    if (manageProviderId === 'all') {
+      setSelectedCategories((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    setSelectedCategories((prev) => {
+      if (prev.length === providerCategories.length && prev.every((value, idx) => value === providerCategories[idx])) {
+        return prev;
+      }
+      return providerCategories;
+    });
+  }, [manageProviderId, providerCategories]);
+
+  const toggleCategory = (category: string) => {
+    setSelectedCategories((prev) => (
+      prev.includes(category) ? prev.filter((item) => item !== category) : [...prev, category]
+    ));
+  };
+
+  useEffect(() => {
+    reloadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSyncProviderServices = async () => {
+    if (manageProviderId === 'all') {
+      setError('Select a provider to sync.');
+      return;
+    }
+    setIsSyncingProvider(true);
+    setError('');
+    setIsReloading(true);
+    try {
+      const response = await fetch('/api/admin/sync-provider-services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: manageProviderId,
+          category: syncCategoriesInput.trim() ? syncCategoriesInput.trim() : undefined,
+          replace_existing: true,
+        }),
+      });
+      const raw = await response.text();
+      let payload: any = {};
+      try {
+        payload = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error('Sync API returned invalid JSON. Ensure server routes are deployed.');
+      }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload?.message || 'Failed to sync provider services');
+      }
+      setError('');
+      await fetchProviderServices();
+    } catch (err: any) {
+      setError(err.message || 'Failed to sync provider services');
+    } finally {
+      setIsSyncingProvider(false);
+      setIsReloading(false);
+    }
+  };
+
+  const handleApplyCategoryFilter = async () => {
+    if (manageProviderId === 'all') {
+      setError('Select a provider first.');
+      return;
+    }
+    if (selectedCategories.length === 0) {
+      setError('Select at least one category to keep.');
+      return;
+    }
+    setIsApplyingCategoryFilter(true);
+    setError('');
+    try {
+      const response = await fetch('/api/admin/provider-services/filter-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: manageProviderId,
+          categories: selectedCategories,
+          replace_existing: true,
+        }),
+      });
+      const raw = await response.text();
+      let payload: any = {};
+      try {
+        payload = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error('Category filter API returned invalid JSON. Ensure server routes are deployed.');
+      }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload?.message || 'Failed to apply category filter');
+      }
+      await fetchProviderServices();
+    } catch (err: any) {
+      setError(err.message || 'Failed to apply category filter');
+    } finally {
+      setIsApplyingCategoryFilter(false);
+    }
+  };
 
   const filteredServices = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -266,7 +408,7 @@ const ServiceManagementPage: React.FC = () => {
       return false;
     });
 
-    console.log('ServiceManagement - filtered services:', result.length, 'from', services?.length);
+    // Avoid noisy logs on every render; rely on the effect-based logger above.
     return result;
   }, [services, statusFilter, categoryFilter, providerFilter, search, providerServicesByServiceId, providerById]);
 
@@ -324,12 +466,97 @@ const ServiceManagementPage: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <div className="bg-brand-container border border-brand-border rounded-2xl p-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Provider Service Manager</h2>
+            <p className="text-xs text-gray-400">Sync services and keep only the categories you need.</p>
+          </div>
+          <div className="text-xs text-gray-400">
+            Selected provider: <span className="text-white">{manageProviderId === 'all' ? 'None' : (providerById.get(manageProviderId)?.name || manageProviderId)}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label htmlFor="provider-manager-provider" className="block text-xs text-gray-400 mb-1">Provider</label>
+            <select
+              id="provider-manager-provider"
+              name="providerManagerProvider"
+              value={manageProviderId}
+              onChange={(e) => setManageProviderId(e.target.value)}
+              className="w-full bg-black/20 border border-brand-border rounded-lg p-2 text-sm"
+            >
+              <option value="all">Select provider</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>{provider.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="provider-manager-sync-categories" className="block text-xs text-gray-400 mb-1">Sync Categories (optional)</label>
+            <input
+              id="provider-manager-sync-categories"
+              name="providerManagerSyncCategories"
+              value={syncCategoriesInput}
+              onChange={(e) => setSyncCategoriesInput(e.target.value)}
+              placeholder="instagram, youtube"
+              className="w-full bg-black/20 border border-brand-border rounded-lg p-2 text-sm"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleSyncProviderServices}
+              className="w-full px-3 py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-sm disabled:opacity-60"
+              disabled={isSyncingProvider}
+            >
+              {isSyncingProvider ? 'Syncing...' : 'Sync Provider Services'}
+            </button>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleApplyCategoryFilter}
+              className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-brand-accent to-brand-purple text-sm disabled:opacity-60"
+              disabled={isApplyingCategoryFilter}
+            >
+              {isApplyingCategoryFilter ? 'Applying...' : 'Keep Selected Categories'}
+            </button>
+          </div>
+        </div>
+
+        {manageProviderId === 'all' ? (
+          <p className="text-xs text-gray-400">Select a provider to manage categories.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {providerCategories.length === 0 ? (
+              <p className="text-xs text-gray-400">No categories loaded yet. Sync provider services first.</p>
+            ) : (
+              providerCategories.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => toggleCategory(cat)}
+                  className={`px-3 py-1 rounded-full text-xs border ${
+                    selectedCategories.includes(cat)
+                      ? 'bg-green-500/20 border-green-500/40 text-green-200'
+                      : 'bg-black/20 border-brand-border text-gray-300'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-5xl lg:grid-cols-5">
           <div className="sm:col-span-2 lg:col-span-2">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Search</label>
+            <label htmlFor="services-search" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Search</label>
             <div className="relative">
               <input
+                id="services-search"
+                name="servicesSearch"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search services, categories, provider ids..."
@@ -342,8 +569,10 @@ const ServiceManagementPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Category</label>
+            <label htmlFor="services-category-filter" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Category</label>
             <select
+              id="services-category-filter"
+              name="servicesCategoryFilter"
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
@@ -358,8 +587,10 @@ const ServiceManagementPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Provider</label>
+            <label htmlFor="services-provider-filter" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Provider</label>
             <select
+              id="services-provider-filter"
+              name="servicesProviderFilter"
               value={providerFilter}
               onChange={(e) => setProviderFilter(e.target.value)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
@@ -375,8 +606,10 @@ const ServiceManagementPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Status</label>
+            <label htmlFor="services-status-filter" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">Status</label>
             <select
+              id="services-status-filter"
+              name="servicesStatusFilter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
@@ -401,6 +634,12 @@ const ServiceManagementPage: React.FC = () => {
         </div>
       </div>
       
+      {servicesTimeoutMessage && (
+        <div className="mb-4 p-4 bg-amber-500/20 text-amber-300 rounded-lg">
+          {servicesTimeoutMessage}
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 p-4 bg-red-500/20 text-red-400 rounded-lg">
           {error}
@@ -598,9 +837,10 @@ const ServiceManagementPage: React.FC = () => {
             <form onSubmit={handleSubmit}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Service Name *</label>
+                  <label htmlFor="service-form-name" className="block text-sm font-medium mb-1">Service Name *</label>
                   <input
                     type="text"
+                    id="service-form-name"
                     name="name"
                     value={formData.name}
                     onChange={handleInputChange}
@@ -610,9 +850,10 @@ const ServiceManagementPage: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Category *</label>
+                  <label htmlFor="service-form-category" className="block text-sm font-medium mb-1">Category *</label>
                   <input
                     type="text"
+                    id="service-form-category"
                     name="category"
                     value={formData.category}
                     onChange={handleInputChange}
@@ -622,11 +863,12 @@ const ServiceManagementPage: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Rate per 1,000 *</label>
+                  <label htmlFor="service-form-rate" className="block text-sm font-medium mb-1">Rate per 1,000 *</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
                     <input
                       type="number"
+                      id="service-form-rate"
                       name="rate_per_1000"
                       value={formData.rate_per_1000}
                       onChange={handleInputChange}
@@ -639,8 +881,9 @@ const ServiceManagementPage: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Status</label>
+                  <label htmlFor="service-form-status" className="block text-sm font-medium mb-1">Status</label>
                   <select
+                    id="service-form-status"
                     name="status"
                     value={formData.status}
                     onChange={handleInputChange}
@@ -652,9 +895,10 @@ const ServiceManagementPage: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Minimum Quantity *</label>
+                  <label htmlFor="service-form-min" className="block text-sm font-medium mb-1">Minimum Quantity *</label>
                   <input
                     type="number"
+                    id="service-form-min"
                     name="min_quantity"
                     value={formData.min_quantity}
                     onChange={handleInputChange}
@@ -665,9 +909,10 @@ const ServiceManagementPage: React.FC = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Maximum Quantity *</label>
+                  <label htmlFor="service-form-max" className="block text-sm font-medium mb-1">Maximum Quantity *</label>
                   <input
                     type="number"
+                    id="service-form-max"
                     name="max_quantity"
                     value={formData.max_quantity}
                     onChange={handleInputChange}
@@ -679,8 +924,9 @@ const ServiceManagementPage: React.FC = () => {
               </div>
               
               <div className="mb-6">
-                <label className="block text-sm font-medium mb-1">Description</label>
+                <label htmlFor="service-form-description" className="block text-sm font-medium mb-1">Description</label>
                 <textarea
+                  id="service-form-description"
                   name="description"
                   value={formData.description}
                   onChange={handleInputChange}

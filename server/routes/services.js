@@ -35,6 +35,15 @@ async function fetchServicesFromDB() {
   return allServices;
 }
 
+async function fetchServicesWithTimeout(timeoutMs = 8000) {
+  return Promise.race([
+    fetchServicesFromDB(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Admin services fetch timed out after ${timeoutMs}ms`)), timeoutMs)
+    ),
+  ]);
+}
+
 // GET /api/admin/services
 // Fetches all services with caching (5-minute TTL)
 router.get('/', async (req, res) => {
@@ -42,7 +51,7 @@ router.get('/', async (req, res) => {
 
   try {
     // Use admin cache with timeout protection
-    const services = await adminCache.get('admin:services', fetchServicesFromDB);
+    const services = await adminCache.get('admin:services', () => fetchServicesWithTimeout(8000));
 
     const age = Date.now() - startTime;
 

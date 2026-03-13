@@ -303,6 +303,9 @@ const LiveChatWidget: React.FC = () => {
             {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
             <div className="flex items-center gap-2">
               <input
+                id="live-chat-message"
+                name="liveChatMessage"
+                aria-label="Chat message"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {

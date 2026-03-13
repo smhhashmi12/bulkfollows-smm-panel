@@ -3,6 +3,7 @@ import Sidebar from '../components/dashboard/Sidebar';
 import DashboardHeader from '../components/dashboard/Header';
 import { DashboardLayout } from '../design-system';
 import type { User } from '../App';
+import { ServerHealthBanner } from '../components/admin/ServerHealthBanner';
 
 const DashboardPage = lazy(() => import('./dashboard/Dashboard'));
 const ServicesPage = lazy(() => import('./dashboard/Services'));
@@ -57,9 +58,12 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
             sidebar={<Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
             navbar={<DashboardHeader user={user} onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />}
         >
-            <Suspense fallback={pageFallback}>
-                {renderPage()}
-            </Suspense>
+            <div className="space-y-4">
+                <ServerHealthBanner />
+                <Suspense fallback={pageFallback}>
+                    {renderPage()}
+                </Suspense>
+            </div>
         </DashboardLayout>
     );
 };

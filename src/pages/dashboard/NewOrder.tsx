@@ -226,7 +226,7 @@ const NewOrderPage: React.FC = () => {
         console.log('[NewOrder] Loading services and profile...');
         
         const [servicesData, userProfile] = await Promise.all([
-          withTimeout(servicesAPI.getMergedServices(), 8000, [], 'new order services'),
+          withTimeout(servicesAPI.getMergedServices(), 20000, [], 'new order services'),
           withTimeout(authAPI.getUserProfile(), 8000, null, 'new order profile'),
         ]);
         setAllServices(servicesData);
@@ -746,6 +746,7 @@ const NewOrderPage: React.FC = () => {
                   {selectedCategory || serviceSearch || selectedPlatform ? (
                     <select
                       id="service"
+                      name="orderService"
                       value={selectedService?.id || ''}
                       onChange={(e) => {
                         const service = searchedServices.find(s => s.id === e.target.value);
@@ -782,6 +783,7 @@ const NewOrderPage: React.FC = () => {
                   <input
                     type="url"
                     id="link"
+                    name="orderLink"
                     value={link}
                     onChange={(e) => setLink(e.target.value)}
                     placeholder="https://www.instagram.com/username"
@@ -797,6 +799,7 @@ const NewOrderPage: React.FC = () => {
                   <input
                     type="number"
                     id="quantity"
+                    name="orderQuantity"
                     value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
                     placeholder="500"
