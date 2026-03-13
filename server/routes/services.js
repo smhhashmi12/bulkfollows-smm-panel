@@ -85,7 +85,7 @@ router.get('/', async (req, res) => {
     res.set('Cache-Control', 'public, max-age=60'); // 1 minute fallback
     res.set('X-Cache-Source', 'fallback');
     res.status(500);
-    return res.json({
+    return res.status(503).json({
       services: [],
       error: 'Services temporarily unavailable',
     });
