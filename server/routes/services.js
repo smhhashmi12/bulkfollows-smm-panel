@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase, supabaseConfigured } from '../lib/supabaseServer.js';
+import { supabase, supabaseConfigured, supabaseAdmin, supabaseAdminConfigured } from '../lib/supabaseServer.js';
 import { adminCache } from '../lib/cache.js';
 
 const router = express.Router();
@@ -11,13 +11,14 @@ const MAX_ROWS = 50000;
  * This is the actual database call
  */
 async function fetchServicesFromDB() {
-  if (!supabaseConfigured || !supabase) {
+  const client = supabaseAdminConfigured && supabaseAdmin ? supabaseAdmin : supabase;
+  if (!client) {
     return [];
   }
 
   const allServices = [];
   for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('services')
       .select('*')
       .range(offset, offset + PAGE_SIZE - 1);
