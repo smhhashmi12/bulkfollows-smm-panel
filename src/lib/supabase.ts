@@ -1,7 +1,13 @@
 import { createClient, type User } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl =
+  import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_URL ||
+  '';
+const supabaseAnonKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  '';
 const FETCH_TIMEOUT_MS = 15_000;
 const LEGACY_AUTH_STORAGE_KEY = 'supabase.auth.token';
 const AUTH_COOKIE_SESSION_ENDPOINT = '/api/auth/session';

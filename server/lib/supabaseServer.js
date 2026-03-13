@@ -1,8 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
 
-process.env.SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const findEnvBySuffix = (suffixes) => {
+  const keys = Object.keys(process.env);
+  for (const suffix of suffixes) {
+    const match = keys.find((key) => key.toUpperCase().endsWith(suffix));
+    if (match && process.env[match]) return process.env[match];
+  }
+  return undefined;
+};
+
+process.env.SUPABASE_URL =
+  process.env.SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  findEnvBySuffix(['_SUPABASE_URL']);
+
 process.env.SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ||
+  findEnvBySuffix(['_SUPABASE_SERVICE_ROLE_KEY', '_SUPABASE_SECRET_KEY']);
+
+process.env.VITE_SUPABASE_ANON_KEY =
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  findEnvBySuffix(['_SUPABASE_ANON_KEY', '_SUPABASE_PUBLISHABLE_KEY']);
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
