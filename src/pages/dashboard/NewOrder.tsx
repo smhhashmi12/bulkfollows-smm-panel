@@ -656,7 +656,7 @@ const NewOrderPage: React.FC = () => {
          
             </div>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2">
                 <div>
                   <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-2">
                     Category
