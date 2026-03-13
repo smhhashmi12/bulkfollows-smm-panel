@@ -34,18 +34,34 @@ const LiveChatWidget: React.FC = () => {
   const { isConnected, connectionError } = useChatSocket(activeChannel?.id ?? null);
 
   const toggleOpen = () => setOpen((prev) => !prev);
-
   const platformMeta = getChatPlatform(activePlatform);
   const handleSend = () => sendMessage(draft);
 
   return (
-    <div className={`fixed bottom-4 right-4 w-80 shadow-lg ${open ? 'h-96' : 'h-12'} transition-all`}>
-      <div className="bg-brand-dark text-white p-2 flex justify-between items-center cursor-pointer" onClick={toggleOpen}>
-        <span>{open ? 'Live Chat' : 'Chat'}</span>
-        <span>{open ? '−' : '+'}</span>
-      </div>
+    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
       {open && (
-        <div className="bg-brand-dark text-white h-full flex flex-col rounded-b-lg overflow-hidden">
+        <div className="w-[22rem] sm:w-80 bg-brand-dark text-white shadow-2xl rounded-2xl overflow-hidden border border-brand-border">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-black/30">
+            <div>
+              <p className="text-sm font-semibold">Live Chat</p>
+              <p className="text-[11px] text-gray-400">
+                {connectionError
+                  ? `Connection: ${connectionError}`
+                  : isConnected
+                    ? 'Connection: live'
+                    : 'Connection: idle'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleOpen}
+              className="h-8 w-8 rounded-full border border-brand-border bg-black/30 text-gray-300 hover:text-white"
+              aria-label="Close chat"
+            >
+              ×
+            </button>
+          </div>
+
           <div className="px-3 py-3 border-b border-brand-border overflow-x-auto ds-scrollbar bg-black/20">
             <div className="flex items-center gap-2">
               {chatPlatforms.map((platform) => (
@@ -62,13 +78,6 @@ const LiveChatWidget: React.FC = () => {
                   {platform.label}
                 </button>
               ))}
-            </div>
-            <div className="mt-2 text-[11px] text-gray-400">
-              {connectionError
-                ? `Connection: ${connectionError}`
-                : isConnected
-                  ? 'Connection: live'
-                  : 'Connection: idle'}
             </div>
           </div>
 
@@ -156,6 +165,19 @@ const LiveChatWidget: React.FC = () => {
           </div>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={toggleOpen}
+        className="h-14 w-14 rounded-full bg-gradient-to-br from-brand-accent to-brand-purple text-white shadow-xl border border-brand-border flex items-center justify-center hover:scale-[1.02] transition"
+        aria-label={open ? 'Close chat' : 'Open chat'}
+      >
+        {open ? '×' : (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2 5a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2H8l-4 3v-3H4a2 2 0 01-2-2V5z" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 };
