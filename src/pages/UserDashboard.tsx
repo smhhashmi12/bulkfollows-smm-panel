@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/dashboard/Sidebar';
 import DashboardHeader from '../components/dashboard/Header';
 import { DashboardLayout } from '../design-system';
@@ -6,12 +6,26 @@ import type { User } from '../App';
 import { ServerHealthBanner } from '../components/admin/ServerHealthBanner';
 
 const DashboardPage = lazy(() => import('./dashboard/Dashboard'));
-const ServicesPage = lazy(() => import('./dashboard/Services'));
-const NewOrderPage = lazy(() => import('./dashboard/NewOrder'));
-const AddFundsPage = lazy(() => import('./dashboard/AddFunds'));
-const OrdersPage = lazy(() => import('./dashboard/Orders'));
-const ApiPage = lazy(() => import('./dashboard/Api'));
-const SupportPage = lazy(() => import('./dashboard/Support'));
+
+const loadUserPage = (page: string) => {
+    switch (page) {
+        case 'services':
+            return lazy(() => import('./dashboard/Services'));
+        case 'new-order':
+            return lazy(() => import('./dashboard/NewOrder'));
+        case 'add-funds':
+            return lazy(() => import('./dashboard/AddFunds'));
+        case 'orders':
+            return lazy(() => import('./dashboard/Orders'));
+        case 'api':
+            return lazy(() => import('./dashboard/Api'));
+        case 'support':
+            return lazy(() => import('./dashboard/Support'));
+        case 'dashboard':
+        default:
+            return DashboardPage;
+    }
+};
 
 interface UserDashboardProps {
     user: User;
@@ -39,19 +53,7 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
         return () => window.removeEventListener('hashchange', handleHashChange);
     }, []);
 
-    const renderPage = () => {
-        switch(page) {
-            case 'services': return <ServicesPage />;
-            case 'new-order': return <NewOrderPage />;
-            case 'add-funds': return <AddFundsPage />;
-            case 'orders': return <OrdersPage />;
-            case 'api': return <ApiPage />;
-            case 'support': return <SupportPage />;
-            case 'dashboard':
-            default: 
-                return <DashboardPage />;
-        }
-    };
+    const PageComponent = useMemo(() => loadUserPage(page), [page]);
 
     return (
         <DashboardLayout
@@ -61,7 +63,7 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
             <div className="space-y-4">
                 <ServerHealthBanner />
                 <Suspense fallback={pageFallback}>
-                    {renderPage()}
+                    <PageComponent />
                 </Suspense>
             </div>
         </DashboardLayout>

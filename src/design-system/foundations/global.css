@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/fonts/space-grotesk-latin-regular.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --color-bg-primary: #0b0f1a;
   --color-bg-secondary: #0f172a;

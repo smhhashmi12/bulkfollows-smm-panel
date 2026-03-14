@@ -1,21 +1,41 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
-import Sidebar from '../components/admin/Sidebar';
-import AdminHeader from '../components/admin/Header';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+const AdminSidebar = lazy(() => import('../components/admin/Sidebar'));
+const AdminHeader = lazy(() => import('../components/admin/Header'));
 import { DashboardLayout } from '../design-system';
 import { ServerHealthBanner } from '../components/admin/ServerHealthBanner';
 const AdminDashboardPage = lazy(() => import('./admin/Dashboard'));
-const UserManagementPage = lazy(() => import('./admin/UserManagement'));
-const ServiceManagementPage = lazy(() => import('./admin/ServiceManagement'));
-const ProviderManagementPage = lazy(() => import('./admin/ProviderManagement'));
-const ProviderMarginManagerPage = lazy(() => import('./admin/ProviderMarginManager'));
-const SettingsPage = lazy(() => import('./admin/SettingsPanel'));
-const OrderManagementPage = lazy(() => import('./admin/OrderManagement'));
-const PaymentLogsPage = lazy(() => import('./admin/PaymentLogs'));
-const SupportTicketsPage = lazy(() => import('./admin/SupportTickets'));
-const AnnouncementsPage = lazy(() => import('./admin/Announcements'));
-const EarningsDashboardPage = lazy(() => import('./admin/EarningsDashboard'));
-const ProviderPayoutsPage = lazy(() => import('./admin/ProviderPayouts'));
-const AdminChatPage = lazy(() => import('./admin/Chat'));
+
+const loadAdminPage = (page: string) => {
+    switch (page) {
+        case 'users':
+            return lazy(() => import('./admin/UserManagement'));
+        case 'services':
+            return lazy(() => import('./admin/ServiceManagement'));
+        case 'providers':
+            return lazy(() => import('./admin/ProviderManagement'));
+        case 'provider-margins':
+            return lazy(() => import('./admin/ProviderMarginManager'));
+        case 'orders':
+            return lazy(() => import('./admin/OrderManagement'));
+        case 'payments':
+            return lazy(() => import('./admin/PaymentLogs'));
+        case 'support':
+            return lazy(() => import('./admin/SupportTickets'));
+        case 'announcements':
+            return lazy(() => import('./admin/Announcements'));
+        case 'earnings':
+            return lazy(() => import('./admin/EarningsDashboard'));
+        case 'payouts':
+            return lazy(() => import('./admin/ProviderPayouts'));
+        case 'chat':
+            return lazy(() => import('./admin/Chat'));
+        case 'settings':
+            return lazy(() => import('./admin/SettingsPanel'));
+        case 'dashboard':
+        default:
+            return AdminDashboardPage;
+    }
+};
 
 
 const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
@@ -39,35 +59,25 @@ const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         return () => window.removeEventListener('hashchange', handleHashChange);
     }, []);
 
-    const renderPage = () => {
-        switch(page) {
-            case 'users': return <UserManagementPage />;
-            case 'services': return <ServiceManagementPage />;
-            case 'providers': return <ProviderManagementPage />;
-            case 'provider-margins': return <ProviderMarginManagerPage />;
-            case 'orders': return <OrderManagementPage />;
-            case 'payments': return <PaymentLogsPage />;
-            case 'support': return <SupportTicketsPage />;
-            case 'announcements': return <AnnouncementsPage />;
-            case 'earnings': return <EarningsDashboardPage />;
-            case 'payouts': return <ProviderPayoutsPage />;
-            case 'chat': return <AdminChatPage />;
-            case 'settings': return <SettingsPage />;
-            case 'dashboard':
-            default: 
-                return <AdminDashboardPage />;
-        }
-    };
+    const PageComponent = useMemo(() => loadAdminPage(page), [page]);
 
     return (
         <DashboardLayout
-            sidebar={<Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
-            navbar={<AdminHeader onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />}
+            sidebar={
+                <Suspense fallback={null}>
+                    <AdminSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+                </Suspense>
+            }
+            navbar={
+                <Suspense fallback={null}>
+                    <AdminHeader onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />
+                </Suspense>
+            }
         >
             <div className="space-y-4">
                 <ServerHealthBanner />
                 <Suspense fallback={pageFallback}>
-                    {renderPage()}
+                    <PageComponent />
                 </Suspense>
             </div>
         </DashboardLayout>

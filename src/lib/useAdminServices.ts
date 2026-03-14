@@ -87,11 +87,10 @@ export function useAdminServices(): UseQueryResult<Service[], Error> {
   return useQuery({
     queryKey: ['adminServices'],
     queryFn: fetchAdminServices,
-    staleTime: 0, // Disable caching to force fresh data
-    gcTime: 0, // Disable garbage time cache
-    retry: false, // Disable retries to see the actual result
-    refetchOnWindowFocus: false, // Avoid refetch loops while debugging
-    // Remove initialData to see if query is actually running
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes (formerly cacheTime)
+    retry: 1, // Retry once on failure
+    refetchOnWindowFocus: false,
   });
 }
 

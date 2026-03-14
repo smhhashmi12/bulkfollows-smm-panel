@@ -20,6 +20,7 @@ const Testimonials: React.FC = () => {
                   src={getAvatarDataUri(testimonial.name)}
                   alt={testimonial.name}
                   className="w-16 h-16 rounded-full border-2 border-brand-purple"
+                  fetchpriority="low"
                   loading="lazy"
                   decoding="async"
                 />

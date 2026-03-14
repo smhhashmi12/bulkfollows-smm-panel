@@ -19,6 +19,7 @@ const SmmPanelServices: React.FC = () => {
                             src={worldMapIllustration}
                             alt="World Map"
                             className="w-full"
+                            fetchpriority="low"
                             loading="lazy"
                             decoding="async"
                         />

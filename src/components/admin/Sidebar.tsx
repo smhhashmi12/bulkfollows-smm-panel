@@ -17,8 +17,20 @@ const Logo: React.FC = () => (
   
 
 // Fix: Changed JSX.Element to React.ReactNode to resolve namespace error.
-const NavLink: React.FC<{ href: string; icon: React.ReactNode; children: React.ReactNode; active: boolean; onClick?: () => void }> = ({ href, icon, children, active, onClick }) => (
- <a href={href} onClick={onClick} className={`flex items-center space-x-3  rounded-xl  `}>
+const NavLink: React.FC<{
+    href: string;
+    icon: React.ReactNode;
+    children: React.ReactNode;
+    active: boolean;
+    onClick?: () => void;
+    onHover?: () => void;
+}> = ({ href, icon, children, active, onClick, onHover }) => (
+ <a
+    href={href}
+    onClick={onClick}
+    onMouseEnter={onHover}
+    className="flex items-center space-x-3 rounded-xl"
+ >
         <div className={`w-[13rem] h-10 flex items-center gap-3 px-4 ${active ? 'bg-gradient-to-r from-brand-accent to-brand-purple text-white shadow-purple-glow-sm' : 'text-gray-300 hover:bg-white/10 hover:text-white'} rounded-lg transition-colors duration-200`}>
             {icon}
         <span className="font-medium">{children}</span>
@@ -58,6 +70,50 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
         if (onClose) onClose();
     };
 
+    const prefetchAdminRoute = (id: string) => {
+        switch (id) {
+            case 'users':
+                void import('../../pages/admin/UserManagement');
+                break;
+            case 'services':
+                void import('../../pages/admin/ServiceManagement');
+                break;
+            case 'providers':
+                void import('../../pages/admin/ProviderManagement');
+                break;
+            case 'provider-margins':
+                void import('../../pages/admin/ProviderMarginManager');
+                break;
+            case 'orders':
+                void import('../../pages/admin/OrderManagement');
+                break;
+            case 'payments':
+                void import('../../pages/admin/PaymentLogs');
+                break;
+            case 'support':
+                void import('../../pages/admin/SupportTickets');
+                break;
+            case 'announcements':
+                void import('../../pages/admin/Announcements');
+                break;
+            case 'earnings':
+                void import('../../pages/admin/EarningsDashboard');
+                break;
+            case 'payouts':
+                void import('../../pages/admin/ProviderPayouts');
+                break;
+            case 'chat':
+                void import('../../pages/admin/Chat');
+                break;
+            case 'settings':
+                void import('../../pages/admin/SettingsPanel');
+                break;
+            default:
+                void import('../../pages/admin/Dashboard');
+                break;
+        }
+    };
+
     return (
         <>
             <aside className="w-[15rem] ds-sidebar rounded-2xl m-3 py-4 hidden md:flex flex-col">
@@ -67,7 +123,13 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
                 </div>
                 <nav className="flex-1 flex flex-col space-y-2">
                     {navItems.map(item => (
-                        <NavLink key={item.id} href={item.href} icon={item.icon} active={activePage === item.id}>
+                        <NavLink
+                            key={item.id}
+                            href={item.href}
+                            icon={item.icon}
+                            active={activePage === item.id}
+                            onHover={() => prefetchAdminRoute(item.id)}
+                        >
                             {item.label}
                         </NavLink>
                     ))}
@@ -99,7 +161,14 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
                     </div>
                     <nav className="flex-1 flex flex-col space-y-2">
                         {navItems.map(item => (
-                            <NavLink key={item.id} href={item.href} icon={item.icon} active={activePage === item.id} onClick={handleLinkClick}>
+                            <NavLink
+                                key={item.id}
+                                href={item.href}
+                                icon={item.icon}
+                                active={activePage === item.id}
+                                onClick={handleLinkClick}
+                                onHover={() => prefetchAdminRoute(item.id)}
+                            >
                                 {item.label}
                             </NavLink>
                         ))}

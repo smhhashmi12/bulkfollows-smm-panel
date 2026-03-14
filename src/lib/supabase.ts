@@ -104,6 +104,17 @@ const buildSessionSignature = (session: StoredSupabaseSession | null) => {
   ].join(':');
 };
 
+const scheduleIdleTask = (task: () => void) => {
+  if (typeof window === 'undefined') return;
+
+  if ('requestIdleCallback' in window) {
+    (window as Window).requestIdleCallback(() => task(), { timeout: 2000 });
+    return;
+  }
+
+  window.setTimeout(task, 300);
+};
+
 const syncAuthCookieMirror = (rawValue: string | null) => {
   if (typeof window === 'undefined') {
     return;
@@ -125,53 +136,55 @@ const syncAuthCookieMirror = (rawValue: string | null) => {
 
   lastAttemptedAuthCookieSyncSignature = signature;
 
-  const request =
-    session?.access_token && session?.refresh_token
-      ? fetch(AUTH_COOKIE_SESSION_ENDPOINT, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            accessToken: session.access_token,
-            refreshToken: session.refresh_token,
-            expiresAt: session.expires_at || null,
-            expiresIn: session.expires_in || null,
-          }),
-          keepalive: true,
-        })
-      : fetch(AUTH_COOKIE_CLEAR_ENDPOINT, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: '{}',
-          keepalive: true,
-        });
+  scheduleIdleTask(() => {
+    const request =
+      session?.access_token && session?.refresh_token
+        ? fetch(AUTH_COOKIE_SESSION_ENDPOINT, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              accessToken: session.access_token,
+              refreshToken: session.refresh_token,
+              expiresAt: session.expires_at || null,
+              expiresIn: session.expires_in || null,
+            }),
+            keepalive: true,
+          })
+        : fetch(AUTH_COOKIE_CLEAR_ENDPOINT, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: '{}',
+            keepalive: true,
+          });
 
-  void request
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Cookie sync failed with ${response.status} ${response.statusText}`);
-      }
+    void request
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Cookie sync failed with ${response.status} ${response.statusText}`);
+        }
 
-      lastSuccessfulAuthCookieSyncSignature = signature;
-      authCookieSyncBackoffUntil = 0;
-      authCookieSyncWarningShown = false;
-    })
-    .catch((error) => {
-      authCookieSyncBackoffUntil = Date.now() + AUTH_COOKIE_SYNC_FAILURE_BACKOFF_MS;
+        lastSuccessfulAuthCookieSyncSignature = signature;
+        authCookieSyncBackoffUntil = 0;
+        authCookieSyncWarningShown = false;
+      })
+      .catch((error) => {
+        authCookieSyncBackoffUntil = Date.now() + AUTH_COOKIE_SYNC_FAILURE_BACKOFF_MS;
 
-      if (SHOULD_LOG_STORAGE && !authCookieSyncWarningShown) {
-        authCookieSyncWarningShown = true;
-        console.warn(
-          '[Storage] Failed to sync auth cookies. Backend /api/auth routes are unreachable; browser-side Supabase session will continue without mirrored cookies until the server is available again.',
-          error
-        );
-      }
-    });
+        if (SHOULD_LOG_STORAGE && !authCookieSyncWarningShown) {
+          authCookieSyncWarningShown = true;
+          console.warn(
+            '[Storage] Failed to sync auth cookies. Backend /api/auth routes are unreachable; browser-side Supabase session will continue without mirrored cookies until the server is available again.',
+            error
+          );
+        }
+      });
+  });
 };
 
 // Custom storage implementation for better persistence and cookie mirroring.

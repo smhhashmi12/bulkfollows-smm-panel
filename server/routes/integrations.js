@@ -268,10 +268,6 @@ router.get(
             id,
             provider_id,
             provider_service_id,
-            provider_rate,
-            our_rate,
-            min_quantity,
-            max_quantity,
             status,
             service_id
           `)
@@ -291,20 +287,25 @@ router.get(
     );
     const serviceById = new Map();
     if (serviceIds.length > 0) {
-      const CHUNK = 500;
+      const CHUNK = 200; // Reduced from 500 to avoid header overflow
       for (let i = 0; i < serviceIds.length; i += CHUNK) {
         const chunk = serviceIds.slice(i, i + CHUNK);
-        const { data: servicesData, error: servicesError } = await supabaseAdmin
-          .from('services')
-          .select('id, name, category, status')
-          .in('id', chunk);
-        if (servicesError) {
-          console.error('[Server] Error fetching services for mapping:', servicesError);
-          break;
+        try {
+          const { data: servicesData, error: servicesError } = await supabaseAdmin
+            .from('services')
+            .select('id, category')  // Only fetch category, not name/status
+            .in('id', chunk);
+          if (servicesError) {
+            console.error('[Server] Error fetching services for mapping:', servicesError);
+            continue;  // Continue instead of break to try remaining chunks
+          }
+          (servicesData || []).forEach((svc) => {
+            serviceById.set(String(svc.id), svc);
+          });
+        } catch (err) {
+          console.warn('[Server] Error in service mapping chunk query:', err.message);
+          continue;
         }
-        (servicesData || []).forEach((svc) => {
-          serviceById.set(String(svc.id), svc);
-        });
       }
     }
 
@@ -321,7 +322,7 @@ router.get(
       value: mergedProviderServices,
     };
 
-    console.log('[Server] Provider services fetched:', mergedProviderServices.length, 'services');
+    console.log('[Server] Provider services fetched:', mergedProviderServices.length, 'services with', serviceIds.length, 'unique services');
     return res.json(successResponse({ providerServices: mergedProviderServices }));
   })
 );

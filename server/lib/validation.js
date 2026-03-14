@@ -27,7 +27,9 @@ export const schemas = {
   }),
   syncProviderServicesSchema: z.object({
     provider_id: z.string().uuid('Invalid provider ID'),
-    markup_percent: z.number().nonnegative('Markup percent must be nonnegative'),
+    category: z.string().optional(),
+    replace_existing: z.boolean().optional(),
+    markup_percent: z.number().nonnegative('Markup percent must be nonnegative').optional(),
   }),
   providerServicesQuerySchema: z.object({
     provider_id: z.string().uuid('Invalid provider_id').optional(),
@@ -90,9 +92,10 @@ export const validateRequest = (schema) => (req, res, next) => {
     next();
   } catch (error) {
     if (error instanceof z.ZodError) {
+      const errors = Array.isArray(error.errors) ? error.errors : [];
       return res.status(400).json({
         error: 'Validation failed',
-        details: error.errors.map(err => ({
+        details: errors.map(err => ({
           field: err.path.join('.'),
           message: err.message,
         })),
@@ -114,9 +117,10 @@ export const validateQuery = (schema) => (req, res, next) => {
     next();
   } catch (error) {
     if (error instanceof z.ZodError) {
+      const errors = Array.isArray(error.errors) ? error.errors : [];
       return res.status(400).json({
         error: 'Query validation failed',
-        details: error.errors.map(err => ({
+        details: errors.map(err => ({
           field: err.path.join('.'),
           message: err.message,
         })),
@@ -138,9 +142,10 @@ export const validateParams = (schema) => (req, res, next) => {
     next();
   } catch (error) {
     if (error instanceof z.ZodError) {
+      const errors = Array.isArray(error.errors) ? error.errors : [];
       return res.status(400).json({
         error: 'Route parameter validation failed',
-        details: error.errors.map(err => ({
+        details: errors.map(err => ({
           field: err.path.join('.'),
           message: err.message,
         })),

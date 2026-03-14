@@ -39,6 +39,7 @@ const ServiceManagementPage: React.FC = () => {
   // Local state
   const [providers, setProviders] = useState<Provider[]>([]);
   const [providerServices, setProviderServices] = useState<ProviderServiceRow[]>([]);
+  const [isLoadingProviderServices, setIsLoadingProviderServices] = useState(false);
   const [error, setError] = useState('');
   const [isReloading, setIsReloading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,6 +47,7 @@ const ServiceManagementPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(updatePending || createPending);
 
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [providerFilter, setProviderFilter] = useState('all'); // 'all' | 'manual' | provider_id
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -57,6 +59,15 @@ const ServiceManagementPage: React.FC = () => {
   const [isSyncingProvider, setIsSyncingProvider] = useState(false);
   const [isApplyingCategoryFilter, setIsApplyingCategoryFilter] = useState(false);
   const [servicesTimeoutMessage, setServicesTimeoutMessage] = useState('');
+
+  // Debounce search input to avoid excessive recalculations
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -94,10 +105,12 @@ const ServiceManagementPage: React.FC = () => {
   }, [servicesLoading]);
 
   const fetchProviderServices = async () => {
+    setIsLoadingProviderServices(true);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), PROVIDER_SERVICES_TIMEOUT_MS);
 
     try {
+      console.log('[ServiceManagement] Fetching provider services...');
       const response = await fetch('/api/integrations/provider-services', { signal: controller.signal });
       if (!response.ok) {
         throw new Error(`Failed to load provider services: ${response.status} ${response.statusText}`);
@@ -105,17 +118,24 @@ const ServiceManagementPage: React.FC = () => {
 
       const payload = await response.json();
       const rows = Array.isArray(payload?.providerServices) ? payload.providerServices : [];
-      setProviderServices(rows);
+      console.log('[ServiceManagement] Received provider services:', {
+        count: rows.length,
+        providers: [...new Set(rows.map(r => r.provider_id))],
+      });
+      // Only update state if we got data - never clear previous data during loading
+      if (rows && rows.length > 0) {
+        setProviderServices(rows);
+      }
     } catch (err: any) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         console.warn('[admin/services] provider-services request timed out; provider filter disabled.');
       } else {
         console.error('[admin/services] provider-services request failed:', err);
       }
-
-      setProviderServices([]);
+      // Don't clear providerServices on error - keep previous data
     } finally {
       clearTimeout(timeoutId);
+      setIsLoadingProviderServices(false);
     }
   };
 
@@ -265,8 +285,16 @@ const ServiceManagementPage: React.FC = () => {
       const category = String(row.services?.category || svc?.category || '').trim();
       if (category) catSet.add(category);
     });
-    return Array.from(catSet).sort((a, b) => a.localeCompare(b));
-  }, [manageProviderId, providerServices, serviceById]);
+    const result = Array.from(catSet).sort((a, b) => a.localeCompare(b));
+    console.log('[ServiceManagement] providerCategories updated:', {
+      manageProviderId,
+      providerServicesCount: providerServices.length,
+      servicesCount: services.length,
+      categoriesCount: result.length,
+      categories: result,
+    });
+    return result;
+  }, [manageProviderId, providerServices, serviceById, services.length]);
 
   useEffect(() => {
     if (manageProviderId === 'all') {
@@ -370,7 +398,7 @@ const ServiceManagementPage: React.FC = () => {
   };
 
   const filteredServices = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
 
     const sorted = [...(services || [])].sort((a, b) => {
       const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''), undefined, { sensitivity: 'base' });
@@ -410,7 +438,7 @@ const ServiceManagementPage: React.FC = () => {
 
     // Avoid noisy logs on every render; rely on the effect-based logger above.
     return result;
-  }, [services, statusFilter, categoryFilter, providerFilter, search, providerServicesByServiceId, providerById]);
+  }, [services, statusFilter, categoryFilter, providerFilter, debouncedSearch, providerServicesByServiceId, providerById]);
 
   const totalPages = Math.max(1, Math.ceil(filteredServices.length / Math.max(1, pageSize)));
   const paginatedServices = useMemo(() => {
@@ -422,7 +450,7 @@ const ServiceManagementPage: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [search, categoryFilter, providerFilter, statusFilter, pageSize, services.length, providerServices.length]);
+  }, [debouncedSearch, categoryFilter, providerFilter, statusFilter, pageSize]);
 
   const handleToggleStatus = async (service: Service) => {
     if (!confirm(`Are you sure you want to ${service.status === 'active' ? 'deactivate' : 'activate'} this service?`)) {
@@ -526,12 +554,13 @@ const ServiceManagementPage: React.FC = () => {
 
         {manageProviderId === 'all' ? (
           <p className="text-xs text-gray-400">Select a provider to manage categories.</p>
+        ) : isLoadingProviderServices ? (
+          <p className="text-xs text-gray-400">Loading categories for {providerById.get(manageProviderId)?.name || 'this provider'}...</p>
+        ) : providerCategories.length === 0 ? (
+          <p className="text-xs text-gray-400">No categories found. Sync provider services first or check if provider has services.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {providerCategories.length === 0 ? (
-              <p className="text-xs text-gray-400">No categories loaded yet. Sync provider services first.</p>
-            ) : (
-              providerCategories.map((cat) => (
+            {providerCategories.map((cat) => (
                 <button
                   key={cat}
                   type="button"
@@ -544,11 +573,11 @@ const ServiceManagementPage: React.FC = () => {
                 >
                   {cat}
                 </button>
-              ))
-            )}
+              ))}
           </div>
         )}
       </div>
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-5xl lg:grid-cols-5">
           <div className="sm:col-span-2 lg:col-span-2">

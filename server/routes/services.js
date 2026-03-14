@@ -4,7 +4,8 @@ import { adminCache } from '../lib/cache.js';
 
 const router = express.Router();
 const PAGE_SIZE = 1000;
-const MAX_ROWS = 50000;
+const MAX_ROWS = 10000;
+const FETCH_TIMEOUT_MS = 30000; // Increased from 8s to 30s for slow connections
 
 /**
  * Fetch all services from Supabase
@@ -36,7 +37,7 @@ async function fetchServicesFromDB() {
   return allServices;
 }
 
-async function fetchServicesWithTimeout(timeoutMs = 8000) {
+async function fetchServicesWithTimeout(timeoutMs = FETCH_TIMEOUT_MS) {
   return Promise.race([
     fetchServicesFromDB(),
     new Promise((_, reject) =>
@@ -61,7 +62,7 @@ router.get('/', async (req, res) => {
     }
 
     // Use admin cache with timeout protection
-    const services = await adminCache.get('admin:services', () => fetchServicesWithTimeout(8000));
+    const services = await adminCache.get('admin:services', () => fetchServicesWithTimeout(FETCH_TIMEOUT_MS));
 
     const age = Date.now() - startTime;
 

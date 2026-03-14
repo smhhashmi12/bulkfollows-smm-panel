@@ -19,8 +19,20 @@ const Logo: React.FC = () => (
   );
 
 // Fix: Changed JSX.Element to React.ReactNode to resolve namespace error.
-const NavLink: React.FC<{ href: string; icon: React.ReactNode; children: React.ReactNode; active: boolean; onClick?: () => void }> = ({ href, icon, children, active, onClick }) => (
-    <a href={href} onClick={onClick} className={`flex items-center space-x-3 py-2 rounded-xl  `}>
+const NavLink: React.FC<{
+    href: string;
+    icon: React.ReactNode;
+    children: React.ReactNode;
+    active: boolean;
+    onClick?: () => void;
+    onHover?: () => void;
+}> = ({ href, icon, children, active, onClick, onHover }) => (
+    <a
+        href={href}
+        onClick={onClick}
+        onMouseEnter={onHover}
+        className="flex items-center space-x-3 py-2 rounded-xl"
+    >
         <div className={`w-48 h-10 flex items-center gap-3 px-4 ${active ? 'bg-gradient-to-r from-brand-accent to-brand-purple text-white shadow-purple-glow-sm' : 'text-gray-300 hover:bg-white/10 hover:text-white'} rounded-lg transition-colors duration-200`}>
             {icon}
         <span className="font-medium">{children}</span>
@@ -50,6 +62,32 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
         { id: 'support', href: '#/dashboard/support', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 2.006l7.997 3.878A2 2 0 0119 7.616V16a2 2 0 01-2 2H3a2 2 0 01-2-2V7.616a2 2 0 011.003-1.732zM10 13a3 3 0 100-6 3 3 0 000 6z" /><path d="M10 13a3 3 0 100-6 3 3 0 000 6z" /></svg>, label: 'Support Tickets' },
     ];
 
+    const prefetchUserRoute = (id: string) => {
+        switch (id) {
+            case 'services':
+                void import('../../pages/dashboard/Services');
+                break;
+            case 'new-order':
+                void import('../../pages/dashboard/NewOrder');
+                break;
+            case 'add-funds':
+                void import('../../pages/dashboard/AddFunds');
+                break;
+            case 'orders':
+                void import('../../pages/dashboard/Orders');
+                break;
+            case 'api':
+                void import('../../pages/dashboard/Api');
+                break;
+            case 'support':
+                void import('../../pages/dashboard/Support');
+                break;
+            default:
+                void import('../../pages/dashboard/Dashboard');
+                break;
+        }
+    };
+
     const handleLinkClick = () => {
         if (onClose) onClose();
     };
@@ -62,7 +100,13 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
                 </div>
                 <nav className="flex-1 flex flex-col space-y-2">
                     {navItems.map(item => (
-                        <NavLink key={item.id} href={item.href} icon={item.icon} active={activePage === item.id}>
+                        <NavLink
+                            key={item.id}
+                            href={item.href}
+                            icon={item.icon}
+                            active={activePage === item.id}
+                            onHover={() => prefetchUserRoute(item.id)}
+                        >
                             {item.label}
                         </NavLink>
                     ))}
@@ -91,7 +135,14 @@ const Sidebar: React.FC<{ isOpen?: boolean; onClose?: () => void }> = ({ isOpen 
                     </div>
                     <nav className="flex-1 flex flex-col space-y-2">
                         {navItems.map(item => (
-                            <NavLink key={item.id} href={item.href} icon={item.icon} active={activePage === item.id} onClick={handleLinkClick}>
+                            <NavLink
+                                key={item.id}
+                                href={item.href}
+                                icon={item.icon}
+                                active={activePage === item.id}
+                                onClick={handleLinkClick}
+                                onHover={() => prefetchUserRoute(item.id)}
+                            >
                                 {item.label}
                             </NavLink>
                         ))}

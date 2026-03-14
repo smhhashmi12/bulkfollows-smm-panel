@@ -1,9 +1,25 @@
 ﻿import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, splitVendorChunkPlugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const analyze = env.ANALYZE === 'true';
+    let visualizerPlugin = null;
+    if (analyze) {
+      try {
+        const mod = await import('rollup-plugin-visualizer');
+        visualizerPlugin = mod.visualizer({
+          filename: 'dist/bundle-report.html',
+          template: 'treemap',
+          gzipSize: true,
+          brotliSize: true,
+          open: true,
+        });
+      } catch (error) {
+        console.warn('[Vite] rollup-plugin-visualizer not installed; skipping bundle report.', error);
+      }
+    }
     return {
       server: {
         port: 3000,
@@ -22,7 +38,11 @@ export default defineConfig(({ mode }) => {
           }
         }
       },
-      plugins: [react()],
+      plugins: [
+        react(),
+        splitVendorChunkPlugin(),
+        visualizerPlugin,
+      ].filter(Boolean),
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
@@ -53,12 +73,17 @@ export default defineConfig(({ mode }) => {
         },
         rollupOptions: {
           output: {
-            manualChunks: {
-              'react-vendor': ['react', 'react-dom'],
-              supabase: ['@supabase/supabase-js'],
-              'feature-analytics': ['@vercel/analytics/react'],
+            manualChunks(id) {
+              if (id.includes('node_modules')) {
+                if (id.includes('@supabase')) return 'supabase';
+                if (id.includes('@tanstack')) return 'react-query';
+                if (id.includes('@vercel/analytics')) return 'feature-analytics';
+                if (id.includes('react')) return 'react-vendor';
+                return 'vendor';
+              }
+              return undefined;
             },
-          }
+          },
         },
         cssCodeSplit: true,
         sourcemap: false,

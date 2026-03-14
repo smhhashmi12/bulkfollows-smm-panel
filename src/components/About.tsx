@@ -19,6 +19,7 @@ const About: React.FC = () => {
                src={aboutDashboardIllustration}
                alt="Bulkfollows Dashboard"
                className="rounded-lg object-cover"
+               fetchpriority="low"
                loading="lazy"
                decoding="async"
              />
