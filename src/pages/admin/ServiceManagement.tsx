@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { adminAPI, Provider, Service } from '../../lib/api';
+import { adminAPI, Provider, Service as ApiService } from '../../lib/api';
 import { useAdminServices, useUpdateService, useCreateService, useDeleteService } from '../../lib/useAdminServices';
 import { isTimeoutError } from '../../lib/utils';
 
@@ -27,7 +27,10 @@ type ProviderServiceRow = {
   } | null;
 };
 
-const PROVIDER_SERVICES_TIMEOUT_MS = 20000;
+const PROVIDER_SERVICES_TIMEOUT_MS = 120000; // 2 minutes (was 60s)
+
+// Make sure Service type always has required description
+type Service = ApiService & { description: string };
 
 const ServiceManagementPage: React.FC = () => {
   // React Query hooks for services data
@@ -106,38 +109,57 @@ const ServiceManagementPage: React.FC = () => {
 
   const fetchProviderServices = async () => {
     setIsLoadingProviderServices(true);
+    setError('');
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), PROVIDER_SERVICES_TIMEOUT_MS);
 
     try {
-      console.log('[ServiceManagement] Fetching provider services...');
-      const response = await fetch('/api/integrations/provider-services', { signal: controller.signal });
+      // force a fresh fetch (avoid 304 cache hits)
+      const url = `/api/integrations/provider-services?ts=${Date.now()}`;
+
+      const response = await fetch(url, {
+        signal: controller.signal,
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
+
       if (!response.ok) {
-        throw new Error(`Failed to load provider services: ${response.status} ${response.statusText}`);
+        throw new Error(`Provider services API returned ${response.status}`);
       }
 
       const payload = await response.json();
       const rows = Array.isArray(payload?.providerServices) ? payload.providerServices : [];
-      console.log('[ServiceManagement] Received provider services:', {
-        count: rows.length,
-        providers: [...new Set(rows.map(r => r.provider_id))],
-      });
-      // Only update state if we got data - never clear previous data during loading
-      if (rows && rows.length > 0) {
-        setProviderServices(rows);
-      }
+      setProviderServices(rows);
     } catch (err: any) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        console.warn('[admin/services] provider-services request timed out; provider filter disabled.');
+      const isTimeout = err instanceof DOMException && err.name === 'AbortError';
+      console.error('[admin/services] provider-services fetch failed:', err);
+
+      if (isTimeout) {
+        setError('Provider services request timed out. Please try again (or check server load).');
       } else {
-        console.error('[admin/services] provider-services request failed:', err);
+        setError(`Failed to load provider services: ${err?.message ?? 'unknown error'}`);
       }
-      // Don't clear providerServices on error - keep previous data
     } finally {
       clearTimeout(timeoutId);
       setIsLoadingProviderServices(false);
     }
   };
+
+  // re-fetch provider-services when user changes the dropdown
+  useEffect(() => {
+    if (manageProviderId !== 'all') {
+      fetchProviderServices();
+    }
+  }, [manageProviderId]);
+
+  useEffect(() => {
+    reloadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchProviders = async () => {
     const data = await adminAPI.getAllProviders();
@@ -249,14 +271,15 @@ const ServiceManagementPage: React.FC = () => {
   const serviceById = useMemo(() => {
     const map = new Map<string, Service>();
     (services || []).forEach((service) => {
-      map.set(String(service.id), service);
+      // Ensure description is always present (fallback to empty string if missing)
+      map.set(String(service.id), { ...service, description: service.description ?? '' });
     });
     return map;
   }, [services]);
 
   const providerServicesByServiceId = useMemo(() => {
     const map = new Map<string, ProviderServiceRow[]>();
-    (providerServices || []).forEach((row) => {
+    (providerServices || []).forEach((row: ProviderServiceRow) => {
       const serviceId = String(row.service_id || '').trim();
       if (!serviceId) return;
       const existing = map.get(serviceId) || [];
@@ -279,7 +302,7 @@ const ServiceManagementPage: React.FC = () => {
   const providerCategories = useMemo(() => {
     if (manageProviderId === 'all') return [];
     const catSet = new Set<string>();
-    providerServices.forEach((row) => {
+    providerServices.forEach((row: ProviderServiceRow) => {
       if (row.provider_id !== manageProviderId) return;
       const svc = row.service_id ? serviceById.get(String(row.service_id)) : null;
       const category = String(row.services?.category || svc?.category || '').trim();
@@ -298,11 +321,11 @@ const ServiceManagementPage: React.FC = () => {
 
   useEffect(() => {
     if (manageProviderId === 'all') {
-      setSelectedCategories((prev) => (prev.length === 0 ? prev : []));
+      setSelectedCategories((prev: string[]) => (prev.length === 0 ? prev : []));
       return;
     }
-    setSelectedCategories((prev) => {
-      if (prev.length === providerCategories.length && prev.every((value, idx) => value === providerCategories[idx])) {
+    setSelectedCategories((prev: string[]) => {
+      if (prev.length === providerCategories.length && prev.every((value: string, idx: number) => value === providerCategories[idx])) {
         return prev;
       }
       return providerCategories;
@@ -310,15 +333,10 @@ const ServiceManagementPage: React.FC = () => {
   }, [manageProviderId, providerCategories]);
 
   const toggleCategory = (category: string) => {
-    setSelectedCategories((prev) => (
-      prev.includes(category) ? prev.filter((item) => item !== category) : [...prev, category]
+    setSelectedCategories((prev: string[]) => (
+      prev.includes(category) ? prev.filter((item: string) => item !== category) : [...prev, category]
     ));
   };
-
-  useEffect(() => {
-    reloadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleSyncProviderServices = async () => {
     if (manageProviderId === 'all') {
@@ -512,11 +530,11 @@ const ServiceManagementPage: React.FC = () => {
               id="provider-manager-provider"
               name="providerManagerProvider"
               value={manageProviderId}
-              onChange={(e) => setManageProviderId(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setManageProviderId(e.target.value)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 text-sm"
             >
               <option value="all">Select provider</option>
-              {providers.map((provider) => (
+              {providers.map((provider: Provider) => (
                 <option key={provider.id} value={provider.id}>{provider.name}</option>
               ))}
             </select>
@@ -527,7 +545,7 @@ const ServiceManagementPage: React.FC = () => {
               id="provider-manager-sync-categories"
               name="providerManagerSyncCategories"
               value={syncCategoriesInput}
-              onChange={(e) => setSyncCategoriesInput(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSyncCategoriesInput(e.target.value)}
               placeholder="instagram, youtube"
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 text-sm"
             />
@@ -560,7 +578,7 @@ const ServiceManagementPage: React.FC = () => {
           <p className="text-xs text-gray-400">No categories found. Sync provider services first or check if provider has services.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {providerCategories.map((cat) => (
+            {providerCategories.map((cat: string) => (
                 <button
                   key={cat}
                   type="button"
@@ -587,7 +605,7 @@ const ServiceManagementPage: React.FC = () => {
                 id="services-search"
                 name="servicesSearch"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
                 placeholder="Search services, categories, provider ids..."
                 className="w-full ds-glass rounded-lg p-2 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple"
               />
@@ -603,11 +621,11 @@ const ServiceManagementPage: React.FC = () => {
               id="services-category-filter"
               name="servicesCategoryFilter"
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategoryFilter(e.target.value)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
             >
               <option value="all">All Categories</option>
-              {categories.map((cat) => (
+              {categories.map((cat: string) => (
                 <option key={cat} value={cat}>
                   {cat}
                 </option>
@@ -621,12 +639,12 @@ const ServiceManagementPage: React.FC = () => {
               id="services-provider-filter"
               name="servicesProviderFilter"
               value={providerFilter}
-              onChange={(e) => setProviderFilter(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProviderFilter(e.target.value)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
             >
               <option value="all">All Providers</option>
               <option value="manual">Manual (No Provider)</option>
-              {(providers || []).map((provider) => (
+              {(providers || []).map((provider: Provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
                 </option>
@@ -640,7 +658,7 @@ const ServiceManagementPage: React.FC = () => {
               id="services-status-filter"
               name="servicesStatusFilter"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatusFilter(e.target.value as any)}
               className="w-full bg-black/20 border border-brand-border rounded-lg p-2 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
             >
               <option value="all">All Status</option>
@@ -697,7 +715,7 @@ const ServiceManagementPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-brand-border">
                 {paginatedServices.length > 0 ? (
-                  paginatedServices.map(service => {
+                  paginatedServices.map((service: Service) => {
                     const mappings = providerServicesByServiceId.get(service.id) || [];
                     const firstMapping = mappings[0];
                     const providerName = firstMapping ? (providerById.get(firstMapping.provider_id)?.name || firstMapping.provider_id) : '';
@@ -707,7 +725,7 @@ const ServiceManagementPage: React.FC = () => {
                     const providerTitle = mappings.length === 0
                       ? 'Manual service (no provider link found).'
                       : mappings
-                          .map((m) => {
+                          .map((m: ProviderServiceRow) => {
                             const name = providerById.get(m.provider_id)?.name || m.provider_id;
                             return `${name} (#${m.provider_service_id})`;
                           })
@@ -818,7 +836,7 @@ const ServiceManagementPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value) || 25)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPageSize(Number(e.target.value) || 25)}
             className="bg-black/20 border border-brand-border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-purple focus:outline-none"
             aria-label="Rows per page"
           >
@@ -828,7 +846,7 @@ const ServiceManagementPage: React.FC = () => {
           </select>
 
           <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => setPage((p: number) => Math.max(1, p - 1))}
             disabled={page <= 1}
             className="px-3 py-1.5 rounded-lg border border-brand-border bg-white/5 text-sm disabled:opacity-50 hover:bg-white/10"
           >
@@ -838,7 +856,7 @@ const ServiceManagementPage: React.FC = () => {
             Page <span className="font-semibold text-white">{page}</span> / {totalPages}
           </div>
           <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => setPage((p: number) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
             className="px-3 py-1.5 rounded-lg border border-brand-border bg-white/5 text-sm disabled:opacity-50 hover:bg-white/10"
           >

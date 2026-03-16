@@ -8,6 +8,7 @@ interface Provider {
   api_key: string;
   api_secret?: string;
   balance: number;
+  markup_percentage?: number;
   status: 'active' | 'inactive' | 'error';
   last_sync?: string;
   created_at?: string;
@@ -18,6 +19,7 @@ interface ProviderFormData {
   api_url: string;
   api_key: string;
   api_secret: string;
+  markup_percentage?: number;
 }
 
 const getBackendUnavailableMessage = () =>
@@ -63,12 +65,16 @@ const ProviderManagementPage: React.FC = () => {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [syncCategories, setSyncCategories] = useState('');
-  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [showMarginModal, setShowMarginModal] = useState(false);
+  const [selectedProviderForMargin, setSelectedProviderForMargin] = useState<Provider | null>(null);
+  const [marginInput, setMarginInput] = useState<number>(0);
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [formData, setFormData] = useState<ProviderFormData>({
     name: '',
     api_url: '',
     api_key: '',
     api_secret: '',
+    markup_percentage: 0,
   });
 
   // Fetch providers on mount
@@ -99,10 +105,11 @@ const ProviderManagementPage: React.FC = () => {
         api_url: provider.api_url,
         api_key: provider.api_key,
         api_secret: provider.api_secret || '',
+        markup_percentage: provider.markup_percentage || 0,
       });
     } else {
       setEditingId(null);
-      setFormData({ name: '', api_url: '', api_key: '', api_secret: '' });
+      setFormData({ name: '', api_url: '', api_key: '', api_secret: '', markup_percentage: 0 });
     }
     setShowModal(true);
     setTestResult(null);
@@ -110,7 +117,29 @@ const ProviderManagementPage: React.FC = () => {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setFormData({ name: '', api_url: '', api_key: '', api_secret: '' });
+    setFormData({ name: '', api_url: '', api_key: '', api_secret: '', markup_percentage: 0 });
+    setTestResult(null);
+  };
+
+  const handleMarginClick = (provider: Provider) => {
+    setSelectedProviderForMargin(provider);
+    setMarginInput(provider.markup_percentage || 0);
+    setShowMarginModal(true);
+  };
+
+  const handleSaveMargin = async () => {
+    if (!selectedProviderForMargin) return;
+    try {
+      const { adminAPI } = await import('../../lib/api');
+      await adminAPI.updateProvider(selectedProviderForMargin.id, {
+        markup_percentage: marginInput,
+      });
+      await fetchProviders();
+      setShowMarginModal(false);
+      alert(`Profit margin updated to ${marginInput}% for ${selectedProviderForMargin.name}`);
+    } catch (err: any) {
+      window.alert(`Failed to update margin: ${err.message}`);
+    }
     setTestResult(null);
   };
 
@@ -129,6 +158,7 @@ const ProviderManagementPage: React.FC = () => {
         api_url: formData.api_url,
         api_key: formData.api_key,
         api_secret: formData.api_secret,
+        markup_percentage: formData.markup_percentage || 0,
         status: 'active',
         balance: editingId ? undefined : 0, // Don't reset balance on edit
       };
@@ -337,6 +367,7 @@ const ProviderManagementPage: React.FC = () => {
                 <th className="p-4 font-semibold">Provider Name</th>
                 <th className="p-4 font-semibold">API URL</th>
                 <th className="p-4 font-semibold">Balance</th>
+                <th className="p-4 font-semibold">Profit Margin</th>
                 <th className="p-4 font-semibold">Status</th>
                 <th className="p-4 font-semibold">Last Sync</th>
                 <th className="p-4 font-semibold">Actions</th>
@@ -350,6 +381,7 @@ const ProviderManagementPage: React.FC = () => {
                     {provider.api_url}
                   </td>
                   <td className="p-4 font-medium text-green-400">${provider.balance?.toFixed(2) || '0.00'}</td>
+                  <td className="p-4 font-semibold text-brand-accent">{provider.markup_percentage || 0}%</td>
                   <td className="p-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[provider.status]}`}>
                       {provider.status.charAt(0).toUpperCase() + provider.status.slice(1)}
@@ -366,6 +398,13 @@ const ProviderManagementPage: React.FC = () => {
                         title="Edit provider"
                       >
                         Edit
+                      </button>
+                      <button
+                        onClick={() => handleMarginClick(provider)}
+                        className="text-brand-accent hover:text-brand-accent/80 text-xs font-semibold px-2 py-1 rounded hover:bg-brand-accent/20 transition-colors"
+                        title="Set profit margin"
+                      >
+                        Margin
                       </button>
                       <button
                         onClick={() => handleTestConnection(provider)}
@@ -472,6 +511,23 @@ const ProviderManagementPage: React.FC = () => {
                   className="w-full bg-black/20 border border-brand-border rounded-lg p-2 pl-10 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
                 />
               </div>
+
+              {/* Profit Margin */}
+              <div>
+                <label htmlFor="provider-form-margin" className="block text-sm font-medium mb-2">Profit Margin (%)</label>
+                <input
+                  type="number"
+                  id="provider-form-margin"
+                  name="profitMargin"
+                  value={formData.markup_percentage || 0}
+                  onChange={(e) => setFormData({ ...formData, markup_percentage: parseFloat(e.target.value) || 0 })}
+                  placeholder="e.g., 25"
+                  min="0"
+                  max="500"
+                  className="w-full bg-black/20 border border-brand-border rounded-lg p-2 pl-10 focus:ring-2 focus:ring-brand-purple focus:outline-none text-sm"
+                />
+                <p className="text-xs text-gray-400 mt-1">Add this percentage to provider cost for your selling price</p>
+              </div>
             </div>
 
             {/* Test Result */}
@@ -504,6 +560,48 @@ const ProviderManagementPage: React.FC = () => {
               </button>
               <button
                 onClick={handleCloseModal}
+                className="flex-1 bg-gray-500/20 hover:bg-gray-500/30 text-gray-300 font-semibold px-4 py-2 rounded-lg transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Profit Margin Modal */}
+      {showMarginModal && selectedProviderForMargin && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-brand-container border border-brand-border rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Set Profit Margin</h2>
+            <p className="text-sm text-gray-400 mb-4">Provider: <span className="font-semibold text-white">{selectedProviderForMargin.name}</span></p>
+
+            <div className="mb-6">
+              <label htmlFor="margin-input" className="block text-sm font-medium mb-2">Profit Margin (%)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  id="margin-input"
+                  value={marginInput}
+                  onChange={(e) => setMarginInput(isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value))}
+                  min="0"
+                  max="500"
+                  className="flex-1 bg-black/20 border border-brand-border rounded-lg p-3 focus:ring-2 focus:ring-brand-purple focus:outline-none"
+                />
+                <span className="text-lg font-bold">%</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Example: If provider price is $10 and margin is 25%, you'll sell for $12.50</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleSaveMargin}
+                className="flex-1 bg-gradient-to-r from-brand-accent to-brand-purple hover:opacity-90 text-white font-semibold px-4 py-2 rounded-lg transition-all"
+              >
+                Save Margin
+              </button>
+              <button
+                onClick={() => setShowMarginModal(false)}
                 className="flex-1 bg-gray-500/20 hover:bg-gray-500/30 text-gray-300 font-semibold px-4 py-2 rounded-lg transition-all"
               >
                 Cancel

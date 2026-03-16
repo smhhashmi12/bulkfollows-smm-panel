@@ -246,7 +246,7 @@ router.get(
 );
 
 // GET /api/integrations/provider-services
-// Fetches provider services with actual service names (bypasses RLS)
+// Fetches provider services with joined service info (so category is available)
 router.get(
   '/provider-services',
   asyncHandler(async (req, res) => {
@@ -255,9 +255,7 @@ router.get(
     }
 
     if (providerServicesCache.expiresAt > Date.now() && providerServicesCache.value) {
-      return res.json(
-        successResponse({ providerServices: providerServicesCache.value, cached: true })
-      );
+      return res.json(successResponse({ providerServices: providerServicesCache.value, cached: true }));
     }
 
     const { data: providerServices, error } = await fetchAllRows(
@@ -268,62 +266,36 @@ router.get(
             id,
             provider_id,
             provider_service_id,
+            provider_rate,
+            our_rate,
+            min_quantity,
+            max_quantity,
             status,
-            service_id
+            service_id,
+            services (
+              id,
+              name,
+              category,
+              description,
+              status
+            )
           `)
-          .eq('status', 'active')
           .range(from, to),
       'provider services query'
     );
 
     if (error) {
       console.error('[Server] Error fetching provider services:', error);
-      // return an empty list rather than error to keep existing behavior
       return res.json(successResponse({ providerServices: [] }));
     }
 
-    const serviceIds = Array.from(
-      new Set((providerServices || []).map((row) => row.service_id).filter(Boolean))
-    );
-    const serviceById = new Map();
-    if (serviceIds.length > 0) {
-      const CHUNK = 200; // Reduced from 500 to avoid header overflow
-      for (let i = 0; i < serviceIds.length; i += CHUNK) {
-        const chunk = serviceIds.slice(i, i + CHUNK);
-        try {
-          const { data: servicesData, error: servicesError } = await supabaseAdmin
-            .from('services')
-            .select('id, category')  // Only fetch category, not name/status
-            .in('id', chunk);
-          if (servicesError) {
-            console.error('[Server] Error fetching services for mapping:', servicesError);
-            continue;  // Continue instead of break to try remaining chunks
-          }
-          (servicesData || []).forEach((svc) => {
-            serviceById.set(String(svc.id), svc);
-          });
-        } catch (err) {
-          console.warn('[Server] Error in service mapping chunk query:', err.message);
-          continue;
-        }
-      }
-    }
-
-    const mergedProviderServices = (providerServices || []).map((row) => {
-      const byId = row.service_id ? serviceById.get(String(row.service_id)) : null;
-      return {
-        ...row,
-        services: byId || null,
-      };
-    });
-
     providerServicesCache = {
       expiresAt: Date.now() + PROVIDER_SERVICES_CACHE_TTL_MS,
-      value: mergedProviderServices,
+      value: providerServices || [],
     };
 
-    console.log('[Server] Provider services fetched:', mergedProviderServices.length, 'services with', serviceIds.length, 'unique services');
-    return res.json(successResponse({ providerServices: mergedProviderServices }));
+    console.log('[Server] Provider services fetched:', (providerServices || []).length, 'rows');
+    return res.json(successResponse({ providerServices: providerServices || [] }));
   })
 );
 

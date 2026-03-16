@@ -11,6 +11,8 @@ const loadAdminPage = (page: string) => {
             return lazy(() => import('./admin/UserManagement'));
         case 'services':
             return lazy(() => import('./admin/ServiceManagement'));
+        case 'pricing':
+            return lazy(() => import('./admin/ServicePricingDashboard'));
         case 'providers':
             return lazy(() => import('./admin/ProviderManagement'));
         case 'provider-margins':
