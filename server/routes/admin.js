@@ -868,14 +868,21 @@ router.post(
       .map((item) => {
         const serviceId = serviceIdByName.get(item.serviceName);
         if (!serviceId) return null;
+        
+        // Ensure numeric values are properly typed
+        const providerRate = parseFloat(item.providerRate) || 0;
+        const ourRate = parseFloat(item.ourRate) || 0;
+        const minQty = parseInt(item.minQuantity) || 1;
+        const maxQty = parseInt(item.maxQuantity) || 10000;
+        
         return {
           provider_id: provider_id,
           service_id: serviceId,
-          provider_service_id: item.providerServiceId,
-          provider_rate: item.providerRate,
-          our_rate: item.ourRate,
-          min_quantity: item.minQuantity,
-          max_quantity: item.maxQuantity,
+          provider_service_id: String(item.providerServiceId),
+          provider_rate: providerRate,
+          our_rate: ourRate,
+          min_quantity: minQty,
+          max_quantity: maxQty,
           status: 'active',
         };
       })
@@ -890,15 +897,37 @@ router.post(
     });
     const dedupedMappings = Array.from(uniqueMappingMap.values());
 
-    if (shouldReplaceExisting) {
-      const { error: deleteError } = await supabaseAdmin
-        .from('provider_services')
-        .delete()
-        .eq('provider_id', provider_id);
-      if (deleteError) {
-        console.warn('[sync-services] Failed to clear old mappings:', deleteError);
-      }
+    // Validate mappings before inserting
+    const invalidMappings = dedupedMappings.filter(m => 
+      !m.provider_id || !m.service_id || !m.provider_service_id || 
+      typeof m.provider_rate !== 'number' || typeof m.our_rate !== 'number'
+    );
+    
+    if (invalidMappings.length > 0) {
+      console.error('[sync-services] Found invalid mappings:', invalidMappings);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid provider service mappings detected',
+        invalid_count: invalidMappings.length,
+      });
     }
+
+    // Always delete old mappings before syncing new ones to avoid UNIQUE constraint violations
+    console.log('[sync-services] Deleting old provider mappings for provider:', provider_id);
+    const { error: deleteError, data: deleteData } = await supabaseAdmin
+      .from('provider_services')
+      .delete()
+      .eq('provider_id', provider_id);
+    
+    if (deleteError) {
+      console.error('[sync-services] Delete error:', deleteError);
+      // Continue anyway, we'll catch the constraint violation on insert
+    } else {
+      console.log('[sync-services] Successfully deleted old mappings, deleted count:', deleteData?.length || 0);
+    }
+    
+    // Add a small delay to ensure deletion completes
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     if (dedupedMappings.length === 0) {
       return res.status(200).json({
@@ -911,18 +940,40 @@ router.post(
     }
 
     const PROVIDER_MAPPING_CHUNK_SIZE = 1000;
+    const upsertedCount = 0;
+    
     for (let i = 0; i < dedupedMappings.length; i += PROVIDER_MAPPING_CHUNK_SIZE) {
       const chunk = dedupedMappings.slice(i, i + PROVIDER_MAPPING_CHUNK_SIZE);
-      const { error: insertMappingsError } = await supabaseAdmin
-        .from('provider_services')
-        .insert(chunk, { defaultToNull: false });
+      
+      try {
+        // Use upsert to handle duplicate keys (update existing, insert new)
+        const { data, error: upsertError } = await supabaseAdmin
+          .from('provider_services')
+          .upsert(chunk, { 
+            onConflict: 'provider_id,provider_service_id',
+            ignoreDuplicates: false
+          });
 
-      if (insertMappingsError) {
-        console.error('[sync-services] Failed to insert provider mappings:', insertMappingsError);
+        if (upsertError) {
+          console.error('[sync-services] Failed to upsert provider mappings:', {
+            error: upsertError,
+            chunk_size: chunk.length,
+            first_item: chunk[0],
+            full_error: JSON.stringify(upsertError)
+          });
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to save provider mappings',
+            error: upsertError.message,
+            details: upsertError.details || upsertError.hint,
+          });
+        }
+      } catch (chunkError) {
+        console.error('[sync-services] Chunk upsert exception:', chunkError);
         return res.status(500).json({
           success: false,
           message: 'Failed to save provider mappings',
-          error: insertMappingsError.message,
+          error: chunkError.message,
         });
       }
     }
