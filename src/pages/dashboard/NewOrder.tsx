@@ -224,7 +224,7 @@ const NewOrderPage: React.FC = () => {
       setLoadingServices(true);
       try {
         console.log('[NewOrder] Loading services and profile...');
-        
+
         const [servicesData, userProfile] = await Promise.all([
           withTimeout(servicesAPI.getMergedServices(), 20000, [], 'new order services'),
           withTimeout(authAPI.getUserProfile(), 8000, null, 'new order profile'),
@@ -407,10 +407,10 @@ const NewOrderPage: React.FC = () => {
     setPaymentInProgress(true);
     try {
       console.log('[NewOrder] Initiating payment for:', amount);
-      
+
       // Create payment record in database
       const payment = await paymentsAPI.createPayment(amount, 'fastpay');
-      
+
       if (payment.fastpay_order_id) {
         // TODO: Redirect to FastPay payment page
         console.log('[NewOrder] Payment initiated, fastpay_order_id:', payment.fastpay_order_id);
@@ -490,7 +490,7 @@ const NewOrderPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto scroll-mt-0  ">
       {/* Status Messages */}
       {orderError && (
         <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400 text-sm flex items-start justify-between">
@@ -506,7 +506,7 @@ const NewOrderPage: React.FC = () => {
           )}
         </div>
       )}
-      
+
       {orderSuccess && (
         <div className="mb-4 bg-green-500/10 border border-green-500/20 rounded-lg p-4 text-green-400 text-sm">
           {orderSuccess}
@@ -553,11 +553,10 @@ const NewOrderPage: React.FC = () => {
                 setSelectedService(null);
                 setServiceSearch('');
               }}
-              className={`inline-flex h-[40px] items-center gap-3 rounded-2xl border px-4 text-[10px] font-[300] transition ${
-                selectedPlatform === ''
+              className={`inline-flex h-[40px] items-center gap-3 rounded-2xl border px-4 text-[10px] font-[300] transition ${selectedPlatform === ''
                   ? 'border-brand-purple/60 bg-gradient-to-r from-brand-accent/20 to-brand-purple/20 text-white shadow-purple-glow-sm'
                   : 'border-white/10 bg-white/[0.03] text-gray-200 hover:border-brand-purple/40 hover:bg-white/[0.05]'
-              }`}
+                }`}
             >
               <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
                 {renderCategoryIcon('all', 'w-4 h-4')}
@@ -574,11 +573,10 @@ const NewOrderPage: React.FC = () => {
                   setSelectedCategory('');
                   setSelectedService(null);
                 }}
-                className={`inline-flex h-[40px] items-center gap-3 rounded-2xl border px-4 text-[10px] font-[300]  transition ${
-                  selectedPlatform === platform.key
+                className={`inline-flex h-[40px] items-center gap-3 rounded-2xl border px-4 text-[10px] font-[300]  transition ${selectedPlatform === platform.key
                     ? 'border-brand-purple/60 bg-gradient-to-r from-brand-accent/20 to-brand-purple/20 text-white shadow-purple-glow-sm'
                     : 'border-white/10 bg-white/[0.03] text-gray-200 hover:border-brand-purple/40 hover:bg-white/[0.05]'
-                }`}
+                  }`}
               >
                 <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${getPlatformInfo(platform.label).accent}`}>
                   {renderCategoryIcon(platform.label, 'w-4 h-4')}
@@ -653,10 +651,10 @@ const NewOrderPage: React.FC = () => {
                 <p className="text-xs uppercase tracking-[0.22em] text-brand-accent font-semibold">Order Placement</p>
                 <h2 className="mt-2 text-xl font-bold text-white">Select service and place order</h2>
               </div>
-         
+
             </div>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2">
+              <div className="flex flex-col gap-4 lg:grid lg:grid-cols-1">
                 <div>
                   <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-2">
                     Category
@@ -698,7 +696,7 @@ const NewOrderPage: React.FC = () => {
                         className="absolute left-0 right-0 z-30 mt-2 max-h-72 overflow-y-auto rounded-2xl border border-brand-border bg-[#120a25] shadow-xl ds-scrollbar"
                       >
                         {visibleCategories.length === 0 ? (
-                          <div className="px-4 py-3 text-sm text-gray-400">
+                          <div className="px-4 py-3 text-lg text-gray-400">
                             No categories found.
                           </div>
                         ) : (
@@ -718,16 +716,15 @@ const NewOrderPage: React.FC = () => {
                                   setServiceSearch('');
                                   setCategoryDropdownOpen(false);
                                 }}
-                                className={`w-full border-b border-brand-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-white/5 flex items-center gap-3 ${
-                                  selected ? 'bg-white/5' : ''
-                                }`}
+                                className={`w-full border-b border-brand-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-white/5 flex items-center gap-3 ${selected ? 'bg-white/5' : ''
+                                  }`}
                               >
                                 <span
-                                  className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${platform.accent}`}
+                                  className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${platform.accent}`}
                                 >
                                   {platform.icon}
                                 </span>
-                                <span className="min-w-0 truncate text-sm font-medium text-white">
+                                <span className="min-w-0 truncate whitespace-normal text-sm font-semibold text-white">
                                   {cat}
                                 </span>
                               </button>
@@ -816,6 +813,71 @@ const NewOrderPage: React.FC = () => {
                 </div>
               </div>
 
+
+              <div className="bg-brand-container border border-brand-border rounded-2xl p-4 lg:hidden">
+                <h2 className="text-lg font-bold mb-4 text-white">Order Details</h2>
+                {selectedService ? (
+                  <div className="space-y-4 text-sm text-gray-300">
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Service Name</p>
+                      <p className="font-semibold text-white">{selectedService.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Category</p>
+                      <p className="font-semibold text-white flex items-center gap-2">
+                        <span>{getPlatformInfo(selectedService.category).icon}</span>
+                        {selectedService.category.charAt(0).toUpperCase() + selectedService.category.slice(1)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Rate</p>
+                      <p className="font-semibold text-brand-accent">{formatAmount(selectedService.rate_per_1000)}/1000</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Estimated Time</p>
+                      <p className="font-semibold text-white">
+                        {getEstimatedTimeHours(selectedService) ? `${getEstimatedTimeHours(selectedService)} hours` : 'Standard'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Quantity Limits</p>
+                      <p className="font-semibold text-white">
+                        {selectedService.min_quantity.toLocaleString()} - {selectedService.max_quantity.toLocaleString()}
+                      </p>
+                    </div>
+                    <hr className="border-brand-border" />
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Link</p>
+                      <p className="font-semibold text-white break-all">{link || 'Add the destination link in the order form.'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Quantity</p>
+                      <p className="font-semibold text-white">{quantity ? Number(quantity).toLocaleString() : 'Add quantity in the order form.'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Charge</p>
+                      <p className="font-semibold text-brand-accent">{quantity ? formatAmount(calculateChargeForDisplay()) : 'Charge updates after quantity input'}</p>
+                    </div>
+                    {selectedService.description && (
+                      <>
+                        <hr className="border-brand-border" />
+                        <div>
+                          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Description</p>
+                          <div className="whitespace-pre-wrap break-words leading-relaxed text-gray-300">
+                            {getDisplayDescription(selectedService.description)}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-gray-400 text-sm">Select a service to view details</p>
+                  </div>
+                )}
+              </div>
+
+
               {/* Charge Calculation */}
               {selectedService && quantity && (
                 <div className="bg-black/40 border border-brand-border rounded-lg p-4 space-y-3">
@@ -871,7 +933,7 @@ const NewOrderPage: React.FC = () => {
 
         {/* Service Details Sidebar */}
         <div>
-          <div className="bg-brand-container border border-brand-border rounded-2xl p-6 sticky top-6">
+          <div className="bg-brand-container border border-brand-border rounded-2xl p-4 hidden lg:block ">
             <h2 className="text-lg font-bold mb-4 text-white">Order Details</h2>
             {selectedService ? (
               <div className="space-y-4 text-sm text-gray-300">
