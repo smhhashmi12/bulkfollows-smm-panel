@@ -277,6 +277,7 @@ router.get(
               name,
               category,
               description,
+              completion_time,
               status
             )
           `)

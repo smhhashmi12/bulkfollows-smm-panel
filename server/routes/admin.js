@@ -9,6 +9,7 @@ import {
 import { AUTH_COOKIE_NAMES } from '../lib/authCookies.js';
 import { successResponse, errorResponse, asyncHandler } from '../lib/apiResponse.js';
 import { validateRequest, validateQuery, validateParams, schemas } from '../lib/validation.js';
+import { globalCache, adminCache } from '../lib/cache.js';
 import { invalidateProviderServicesCache } from './integrations.js';
 
 const router = express.Router();
@@ -80,6 +81,86 @@ const limitText = (value, maxLength = 240) => {
   const text = String(value || '').trim();
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength - 1).trimEnd() + '…';
+};
+
+const convertDurationToHours = (amount, unit) => {
+  const numericAmount = Number.parseFloat(String(amount ?? ''));
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) return null;
+
+  const normalizedUnit = String(unit || '').toLowerCase();
+  if (normalizedUnit.startsWith('day')) {
+    return Math.max(1, Math.ceil(numericAmount * 24));
+  }
+
+  if (normalizedUnit.startsWith('min')) {
+    return Math.max(1, Math.ceil(numericAmount / 60));
+  }
+
+  return Math.max(1, Math.ceil(numericAmount));
+};
+
+const parseDurationTextToHours = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.max(1, Math.ceil(value));
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (!text) return null;
+
+  const rangeMatch = text.match(
+    /(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(minutes?|mins?|min|hours?|hrs?|hr|days?|day)\b/i
+  );
+  if (rangeMatch) {
+    return convertDurationToHours(rangeMatch[2], rangeMatch[3]);
+  }
+
+  const directMatch = text.match(
+    /(\d+(?:\.\d+)?)\s*(minutes?|mins?|min|hours?|hrs?|hr|days?|day)\b/i
+  );
+  if (directMatch) {
+    return convertDurationToHours(directMatch[1], directMatch[2]);
+  }
+
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    return Math.max(1, Math.ceil(Number.parseFloat(text)));
+  }
+
+  return null;
+};
+
+const extractCompletionTimeHours = (providerService) => {
+  const directFieldHours = parseDurationTextToHours(
+    pickFirst(
+      providerService?.completion_time,
+      providerService?.delivery_time,
+      providerService?.estimated_time,
+      providerService?.avg_time,
+      providerService?.average_time,
+      providerService?.time,
+      providerService?.speed
+    )
+  );
+
+  if (directFieldHours) return directFieldHours;
+
+  return parseDurationTextToHours(
+    pickFirst(
+      providerService?.description,
+      providerService?.desc,
+      providerService?.details,
+      providerService?.note,
+      providerService?.notes,
+      providerService?.info,
+      ''
+    )
+  );
+};
+
+const invalidateServiceCaches = () => {
+  invalidateProviderServicesCache();
+  globalCache.invalidate('public:services');
+  adminCache.invalidate('admin:services');
 };
 
 const getEmbeddedObject = (value) => {
@@ -656,6 +737,7 @@ router.post(
       const rawProviderRate = toNumber(pickFirst(svc.rate, svc.price), 0);
       const rawMinQuantity = toInteger(pickFirst(svc.min, svc.min_quantity), 1);
       const rawMaxQuantity = toInteger(pickFirst(svc.max, svc.max_quantity), 10000);
+      const completionTime = extractCompletionTimeHours(svc);
       const providerRate = clampDecimal10_2(rawProviderRate, 0);
       const effectiveMarkup = providerDefaultRule
         ? applyMarginToRate(providerRate, {
@@ -687,6 +769,7 @@ router.post(
         ourRate,
         minQuantity,
         maxQuantity: Math.max(maxQuantity, minQuantity),
+        completionTime,
       };
     });
 
@@ -708,6 +791,7 @@ router.post(
       rate_per_1000: item.ourRate,
       min_quantity: item.minQuantity,
       max_quantity: item.maxQuantity,
+      completion_time: item.completionTime,
       status: 'active',
     }));
 
@@ -985,7 +1069,7 @@ router.post(
 
     console.log('[sync-services] Successfully synced', dedupedMappings.length, 'services');
 
-    invalidateProviderServicesCache();
+    invalidateServiceCaches();
     return res.status(200).json({
       success: true,
       count: dedupedMappings.length,
@@ -1228,6 +1312,7 @@ router.patch(
       }
     }
 
+    invalidateServiceCaches();
     return res.json(successResponse({ message: 'Provider service updated successfully' }));
   } catch (error) {
     console.error('[provider-services] update error:', error);
@@ -1339,7 +1424,7 @@ router.post('/provider-services/filter-categories', async (req, res) => {
         .in('id', serviceIdsToDisable);
     }
 
-    invalidateProviderServicesCache();
+    invalidateServiceCaches();
     return res.status(200).json({ success: true, removed: toRemove.length, kept: toKeep.length });
   } catch (error) {
     const serverError = getSupabaseServerError(error, 'Failed to filter provider services');
@@ -1728,7 +1813,7 @@ router.post('/provider-margins/apply', async (req, res) => {
       }
     }
 
-    invalidateProviderServicesCache();
+    invalidateServiceCaches();
     return res.status(200).json({
       success: true,
       applied: rules.length,
@@ -1784,7 +1869,7 @@ router.post('/provider-margins/reset', async (req, res) => {
       }
     }
 
-    invalidateProviderServicesCache();
+    invalidateServiceCaches();
     return res.status(200).json({ success: true, reset: updates.length });
   } catch (error) {
     const serverError = getSupabaseServerError(error, 'Failed to reset provider margins');

@@ -450,11 +450,21 @@ export const servicesAPI = {
         }
         if (!providerInfo) return service;
 
+        const linkedService = Array.isArray(providerInfo?.services)
+          ? providerInfo.services[0]
+          : providerInfo?.services;
+        const completionTime =
+          linkedService?.completion_time ?? service.completion_time ?? null;
+
         return {
           ...service,
           rate_per_1000: Number(providerInfo.our_rate ?? service.rate_per_1000),
           min_quantity: Number(providerInfo.min_quantity ?? service.min_quantity),
           max_quantity: Number(providerInfo.max_quantity ?? service.max_quantity),
+          completion_time:
+            completionTime === null || completionTime === undefined
+              ? null
+              : Number(completionTime),
         };
       });
 

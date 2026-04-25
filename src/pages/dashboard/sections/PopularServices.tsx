@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Service } from '../../../lib/api';
 import { Button, Tabs, type TabItem, Badge } from '../../../design-system';
+import { SocialPlatformIcon } from '../../../components/social/SocialIcon';
 
 type PopularServicesProps = {
   services: Service[];
@@ -15,7 +16,6 @@ type PlatformTheme = {
   keywords: string[];
   gradient: string;
   chipClass: string;
-  iconClass: string;
   icon: (className: string) => React.ReactNode;
 };
 
@@ -29,32 +29,19 @@ const iconGrid = (className: string) => (
 );
 
 const iconInstagram = (className: string) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="5" />
-    <circle cx="12" cy="12" r="4" />
-    <circle cx="17" cy="7" r="1" />
-  </svg>
+  <SocialPlatformIcon platform="instagram" className={className} />
 );
 
 const iconTiktok = (className: string) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
-    <path d="M9 13V5l8-2v8" />
-    <circle cx="17" cy="11" r="2" />
-  </svg>
+  <SocialPlatformIcon platform="tiktok" className={className} />
 );
 
 const iconFacebook = (className: string) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <path d="M15 3h-3a4 4 0 0 0-4 4v3H6v4h2v7h4v-7h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
-  </svg>
+  <SocialPlatformIcon platform="facebook" className={className} />
 );
 
 const iconYouTube = (className: string) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <rect x="3" y="6" width="18" height="12" rx="4" />
-    <polygon points="10,9 16,12 10,15" fill="#0b0f1a" />
-  </svg>
+  <SocialPlatformIcon platform="youtube" className={className} />
 );
 
 const platformThemes: PlatformTheme[] = [
@@ -64,7 +51,6 @@ const platformThemes: PlatformTheme[] = [
     keywords: [],
     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(15, 23, 42, 0.95))',
     chipClass: 'bg-white/10 text-white ring-1 ring-white/10',
-    iconClass: 'bg-white/10 text-white ring-1 ring-white/10',
     icon: iconGrid,
   },
   {
@@ -73,7 +59,6 @@ const platformThemes: PlatformTheme[] = [
     keywords: ['instagram', 'insta', 'ig'],
     gradient: 'linear-gradient(135deg, rgba(236, 72, 153, 0.28), rgba(124, 58, 237, 0.55))',
     chipClass: 'bg-pink-500/20 text-pink-200 ring-1 ring-pink-500/30',
-    iconClass: 'bg-pink-500/20 text-pink-200 ring-1 ring-pink-500/30',
     icon: iconInstagram,
   },
   {
@@ -82,7 +67,6 @@ const platformThemes: PlatformTheme[] = [
     keywords: ['tiktok', 'tik tok', 'tt'],
     gradient: 'linear-gradient(135deg, rgba(20, 184, 166, 0.3), rgba(59, 130, 246, 0.5))',
     chipClass: 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30',
-    iconClass: 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30',
     icon: iconTiktok,
   },
   {
@@ -91,7 +75,6 @@ const platformThemes: PlatformTheme[] = [
     keywords: ['facebook', 'fb', 'meta'],
     gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(37, 99, 235, 0.6))',
     chipClass: 'bg-blue-500/20 text-blue-200 ring-1 ring-blue-500/30',
-    iconClass: 'bg-blue-500/20 text-blue-200 ring-1 ring-blue-500/30',
     icon: iconFacebook,
   },
   {
@@ -100,7 +83,6 @@ const platformThemes: PlatformTheme[] = [
     keywords: ['youtube', 'yt'],
     gradient: 'linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(153, 27, 27, 0.7))',
     chipClass: 'bg-red-500/20 text-red-200 ring-1 ring-red-500/30',
-    iconClass: 'bg-red-500/20 text-red-200 ring-1 ring-red-500/30',
     icon: iconYouTube,
   },
   {
@@ -109,7 +91,6 @@ const platformThemes: PlatformTheme[] = [
     keywords: [],
     gradient: 'linear-gradient(135deg, rgba(71, 85, 105, 0.35), rgba(15, 23, 42, 0.95))',
     chipClass: 'bg-white/10 text-gray-200 ring-1 ring-white/10',
-    iconClass: 'bg-white/10 text-gray-200 ring-1 ring-white/10',
     icon: iconGrid,
   },
 ];
@@ -133,11 +114,7 @@ const PopularServices: React.FC<PopularServicesProps> = ({ services, activeCateg
     .map(platform => ({
       id: platform.id,
       label: platform.label,
-      icon: (
-        <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${platform.chipClass}`}>
-          {platform.icon('h-3.5 w-3.5')}
-        </span>
-      ),
+      icon: platform.icon('h-5 w-5'),
     }));
 
   const visibleServices =
@@ -164,8 +141,8 @@ const PopularServices: React.FC<PopularServicesProps> = ({ services, activeCateg
               style={{ background: platform.gradient }}
             >
               <div className="flex items-start justify-between mb-3">
-                <div className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ${platform.iconClass}`}>
-                  {platform.icon('h-5 w-5')}
+                <div className="flex h-8 w-8 items-center justify-center shrink-0">
+                  {platform.icon('h-8 w-8')}
                 </div>
                 <Badge variant="info" className={platform.chipClass}>
                   {formatAmount(service.rate_per_1000)}/1k

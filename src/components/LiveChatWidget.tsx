@@ -38,7 +38,7 @@ const LiveChatWidget: React.FC = () => {
   const handleSend = () => sendMessage(draft);
 
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end gap-3">
+    <div className="fixed bottom-16 md:bottom-5 lg:bottom-5 xl:bottom-5 right-5 z-[9999] flex flex-col items-end gap-3">
       {open && (
         <div className="w-[22rem] sm:w-80 bg-brand-dark text-white shadow-2xl rounded-2xl overflow-hidden border border-brand-border">
           <div className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-black/30">
@@ -72,7 +72,7 @@ const LiveChatWidget: React.FC = () => {
                     activePlatform === platform.id ? 'ds-btn-primary text-white' : 'ds-pill text-gray-300 hover:text-white'
                   }`}
                 >
-                  <span className={`h-6 w-6 rounded-full flex items-center justify-center ${platform.accent}`}>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center">
                     {platform.icon}
                   </span>
                   {platform.label}
@@ -96,7 +96,7 @@ const LiveChatWidget: React.FC = () => {
             {userId && !activeChannel && !loadingChannels && !loadingMessages && (
               <div className="text-center space-y-3">
                 <div className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-full ds-pill text-gray-300">
-                  <span className={`h-6 w-6 rounded-full flex items-center justify-center ${platformMeta.accent}`}>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center">
                     {platformMeta.icon}
                   </span>
                   {platformMeta.label} chat not started

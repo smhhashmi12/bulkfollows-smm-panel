@@ -4,6 +4,7 @@ import { withTimeout } from '../../lib/withTimeout';
 import type { Service } from '../../lib/api';
 import { useCurrency } from '../../lib/CurrencyContext';
 import { storePendingOrderServiceId } from '../../lib/pendingOrderService';
+import { renderSocialPlatformIcon } from '../../components/social/SocialIcon';
 
 type SortOption = 'recommended' | 'price' | 'speed';
 
@@ -50,82 +51,10 @@ const getCategoryPlatform = (category: string) => {
 
 const renderCategoryIcon = (category: string, className = 'w-4 h-4') => {
   const value = category.toLowerCase();
+  const socialIcon = renderSocialPlatformIcon(category, { className });
 
-  if (value.includes('instagram')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="4" y="4" width="16" height="16" rx="5" />
-        <circle cx="12" cy="12" r="3.4" />
-        <circle cx="17.2" cy="6.8" r="1" fill="currentColor" stroke="none" />
-      </svg>
-    );
-  }
-
-  if (value.includes('facebook')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M13 8h2V4h-2a4 4 0 0 0-4 4v3H7v4h2v5h4v-5h2.3l.7-4H13V8a1 1 0 0 1 1-1z" />
-      </svg>
-    );
-  }
-
-  if (value.includes('youtube')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="3" y="6" width="18" height="12" rx="4" />
-        <path d="M10 9.5l5 2.5-5 2.5v-5z" fill="currentColor" stroke="none" />
-      </svg>
-    );
-  }
-
-  if (value.includes('twitter')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M7 17c7 0 11-5.5 11-10.3v-.5A7.6 7.6 0 0 0 20 4.1a7.5 7.5 0 0 1-2.3.6A3.8 3.8 0 0 0 19.4 2a7.8 7.8 0 0 1-2.5 1A3.8 3.8 0 0 0 10.3 6a10.8 10.8 0 0 1-7.8-3.9A3.7 3.7 0 0 0 3.7 7a3.8 3.8 0 0 1-1.7-.5v.1A3.8 3.8 0 0 0 5 10.3a4.2 4.2 0 0 1-1.7.1 3.8 3.8 0 0 0 3.6 2.6A7.7 7.7 0 0 1 2 14.6a10.7 10.7 0 0 0 5.8 1.7" />
-      </svg>
-    );
-  }
-
-  if (value.includes('spotify') || value.includes('tiktok') || value.includes('music')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M14 4v10a3 3 0 1 1-2-2.83V6.5c.9 1.1 2.1 1.8 3.7 2" />
-      </svg>
-    );
-  }
-
-  if (value.includes('linkedin')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="4" y="4" width="16" height="16" rx="2.5" />
-        <path d="M8 10v6M8 8h.01M12 16v-3.5a2 2 0 0 1 4 0V16" />
-      </svg>
-    );
-  }
-
-  if (value.includes('telegram')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M21 4L3 11l6 2 2 6 10-15z" />
-      </svg>
-    );
-  }
-
-  if (value.includes('snapchat')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M12 4c2.2 0 4 1.9 4 4.3 0 .6 0 1 .3 1.3.5.6 1.2 1 2.1 1-.3 1-.9 1.7-2 2.1.1 1.7 1.1 2.3 2.1 2.7-.5.9-1.4 1.2-2.5 1.3-.5 1.3-1.8 2-4 2s-3.5-.7-4-2c-1.1-.1-2-.4-2.5-1.3 1-.4 2-.9 2.1-2.7-1.1-.4-1.7-1.1-2-2.1.9 0 1.6-.4 2.1-1 .3-.3.3-.7.3-1.3C8 5.9 9.8 4 12 4z" />
-      </svg>
-    );
-  }
-
-  if (value.includes('discord')) {
-    return (
-      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M8 8c2-1 6-1 8 0 .8 1.2 1.4 2.5 1.8 4-1 1.1-2 2-3.2 2.8l-.8-1.2M8.2 14.8C7 14 6 13.1 5 12c.4-1.5 1-2.8 1.8-4M9.5 12h.01M14.5 12h.01" />
-        <path d="M7.5 17c1.4.7 2.9 1 4.5 1s3.1-.3 4.5-1" />
-      </svg>
-    );
+  if (socialIcon) {
+    return socialIcon;
   }
 
   if (value.includes('soundcloud')) {
@@ -167,7 +96,7 @@ const getPlatformInfo = (category: string) => {
   if (value.includes('discord')) accent = 'from-indigo-500/20 to-violet-500/20 border-indigo-400/30 text-indigo-200';
   if (value.includes('soundcloud')) accent = 'from-orange-500/20 to-amber-500/20 border-orange-400/30 text-orange-200';
   if (value.includes('traffic') || value.includes('website')) accent = 'from-violet-500/20 to-fuchsia-500/20 border-violet-400/30 text-violet-200';
-  return { icon: renderCategoryIcon(category, 'w-4 h-4'), accent };
+  return { icon: renderCategoryIcon(category, 'w-5 h-5'), accent };
 };
 
 const ServicesPage: React.FC = () => {
@@ -333,8 +262,8 @@ const ServicesPage: React.FC = () => {
             }`}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
-                {renderCategoryIcon('all', 'w-4 h-4')}
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center">
+                {renderCategoryIcon('all', 'w-6 h-6')}
               </span>
               <span className="truncate font-semibold">All Services</span>
             </div>
@@ -353,8 +282,8 @@ const ServicesPage: React.FC = () => {
               }`}
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-gradient-to-br ${getPlatformInfo(platform.label).accent}`}>
-                  {renderCategoryIcon(platform.label, 'w-4 h-4')}
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center">
+                  {renderCategoryIcon(platform.label, 'w-6 h-6')}
                 </span>
                 <span className="truncate font-semibold">{platform.label}</span>
               </div>

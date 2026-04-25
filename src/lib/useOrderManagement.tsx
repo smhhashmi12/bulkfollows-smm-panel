@@ -20,6 +20,10 @@ export interface OrderResult {
   charge: number;
   orderId?: string;
   providerOrderId?: string;
+  quantity?: number | null;
+  startCount?: number | null;
+  remains?: number | null;
+  estimatedCompletionHours?: number | null;
   message?: string;
 }
 
@@ -70,6 +74,12 @@ export const useOrderManagement = () => {
     if (rawStatus.includes('cancel') || rawStatus.includes('fail')) return 'failed';
     if (rawStatus.includes('process')) return 'processing';
     return 'pending';
+  };
+
+  const normalizeProgressField = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
   };
 
   /**
@@ -180,6 +190,17 @@ export const useOrderManagement = () => {
                   charge: prev?.charge || 0,
                   orderId,
                   providerOrderId,
+                  quantity: prev?.quantity ?? null,
+                  startCount:
+                    normalizeProgressField(statusNode?.start_count) ??
+                    prev?.startCount ??
+                    null,
+                  remains:
+                    normalizeProgressField(statusNode?.remains) ??
+                    prev?.remains ??
+                    null,
+                  estimatedCompletionHours:
+                    prev?.estimatedCompletionHours ?? null,
                   message: rawStatus ? `Provider status: ${rawStatus}` : 'Provider status updated',
                 }));
 
@@ -206,6 +227,10 @@ export const useOrderManagement = () => {
                   status: mappedStatus,
                   charge: orderData.charge || 0,
                   orderId: orderData.id,
+                  quantity: orderData.quantity ?? null,
+                  startCount: normalizeProgressField(orderData.start_count),
+                  remains: normalizeProgressField(orderData.remains),
+                  estimatedCompletionHours: orderData.delivery_time ?? null,
                 });
 
                 if (mappedStatus === 'completed' || mappedStatus === 'failed') {
@@ -326,6 +351,8 @@ export const useOrderManagement = () => {
               status: 'failed',
               charge: charge,
               orderId: createdOrder.id,
+              quantity: orderData.quantity,
+              estimatedCompletionHours: orderData.deliveryTime,
               message: String(providerError),
             };
             setOrderStatus(failedResult);
@@ -341,6 +368,8 @@ export const useOrderManagement = () => {
             status: 'failed',
             charge: charge,
             orderId: createdOrder.id,
+            quantity: orderData.quantity,
+            estimatedCompletionHours: orderData.deliveryTime,
             message: providerError,
           };
           setOrderStatus(failedResult);
@@ -369,6 +398,8 @@ export const useOrderManagement = () => {
           charge: charge,
           orderId: createdOrder.id,
           providerOrderId,
+          quantity: orderData.quantity,
+          estimatedCompletionHours: orderData.deliveryTime,
           message: 'Order created and sent to provider.',
         };
 
