@@ -38,7 +38,7 @@ const LiveChatWidget: React.FC = () => {
   const handleSend = () => sendMessage(draft);
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+    <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end gap-3">
       {open && (
         <div className="w-[22rem] sm:w-80 bg-brand-dark text-white shadow-2xl rounded-2xl overflow-hidden border border-brand-border">
           <div className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-black/30">

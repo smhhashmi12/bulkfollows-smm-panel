@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 const AdminSidebar = lazy(() => import('../components/admin/Sidebar'));
 const AdminHeader = lazy(() => import('../components/admin/Header'));
+
 import { DashboardLayout } from '../design-system';
 import { ServerHealthBanner } from '../components/admin/ServerHealthBanner';
 const AdminDashboardPage = lazy(() => import('./admin/Dashboard'));
@@ -75,6 +76,7 @@ const AdminDashboard: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                     <AdminHeader onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />
                 </Suspense>
             }
+            
         >
             <div className="space-y-4">
                 <ServerHealthBanner />

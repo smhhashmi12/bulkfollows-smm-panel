@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/dashboard/Sidebar';
 import DashboardHeader from '../components/dashboard/Header';
+import MobileFooterNav from '../components/dashboard/MobileFooterNav';
 import { DashboardLayout } from '../design-system';
 import type { User } from '../App';
 import { ServerHealthBanner } from '../components/admin/ServerHealthBanner';
@@ -58,7 +59,9 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ user, onLogout }) => {
     return (
         <DashboardLayout
             sidebar={<Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
+            bottomNav={<MobileFooterNav />}
             navbar={<DashboardHeader user={user} onLogout={onLogout} onToggleSidebar={() => setSidebarOpen(true)} />}
+            bottomNav={<MobileFooterNav />}
         >
             <div className="space-y-4">
                 <ServerHealthBanner />

@@ -490,7 +490,7 @@ const NewOrderPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto scroll-mt-0  ">
+    <div className="max-w-6xl mx-auto scroll-mt-0 pb-28 md:pb-0">
       {/* Status Messages */}
       {orderError && (
         <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400 text-sm flex items-start justify-between">
