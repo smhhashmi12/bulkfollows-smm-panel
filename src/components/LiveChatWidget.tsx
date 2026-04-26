@@ -62,7 +62,7 @@ const LiveChatWidget: React.FC = () => {
             </button>
           </div>
 
-          <div className="px-3 py-3 border-b border-brand-border overflow-x-auto ds-scrollbar bg-black/20">
+          {/* <div className="px-3 py-3 border-b border-brand-border overflow-x-auto ds-scrollbar bg-black/20">
             <div className="flex items-center gap-2">
               {chatPlatforms.map((platform) => (
                 <button
@@ -79,7 +79,7 @@ const LiveChatWidget: React.FC = () => {
                 </button>
               ))}
             </div>
-          </div>
+          </div> */}
 
           <div className="px-4 py-4 h-64 overflow-y-auto ds-scrollbar space-y-3">
             {loadingChannels && (

@@ -68,11 +68,12 @@ const MobileFooterNav = () => {
         <div className="relative z-100 flex items-center justify-center p-4">
           <a
             href="#/dashboard/new-order"
-            className="absolute -top-12 w-16 h-16  rounded-full flex items-center justify-center border-blue-500/40 text-blue-200 bg-gradient-to-r from-brand-accent to-brand-purple shadow-[0_0_50px_rgba(59,130,246,0.35)]"
+            className="absolute -top-10 w-16 h-16  rounded-full flex items-center justify-center border-blue-500/40 text-blue-200 bg-gradient-to-r from-brand-accent to-brand-purple shadow-[0_0_50px_rgba(59,130,246,0.35)]"
             id="fab-button"
           >
             <Plus size={32} strokeWidth={2.5} />
           </a>
+          <p className="text-white text-md font-medium mt-2 ">New Order</p>
         </div>
 
         <NavItem

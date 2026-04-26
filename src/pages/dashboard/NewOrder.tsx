@@ -1202,7 +1202,7 @@ const NewOrderPage: React.FC = () => {
                                     <span className="block text-sm font-semibold text-white break-words">
                                       {service.name}
                                     </span>
-                                    <span className="mt-1 block text-xs text-gray-400 break-words leading-relaxed">
+                                    <span className="mt-1 block text-xs text-green-400 break-words leading-relaxed">
                                       {formatAmount(service.rate_per_1000)}/1k • Min{" "}
                                       {service.min_quantity.toLocaleString()} • Max{" "}
                                       {service.max_quantity.toLocaleString()} •{" "}
